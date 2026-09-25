@@ -12,6 +12,7 @@ const { Vault } = require('../src/main/vault');
 const { Settings } = require('../src/main/settings');
 const providers = require('../src/main/providers');
 const harnesses = require('../src/main/harnesses');
+const agentEnv = require('../src/main/agent-env');
 
 let passed = 0;
 let failed = 0;
@@ -346,6 +347,42 @@ test('an unsupported provider is refused everywhere it could be added', async ()
   }
   const listed = providers.ALL_PROVIDERS.map((p) => p.id);
   for (const id of banned) assert.ok(!listed.includes(id.toLowerCase()), 'the catalog never offers it');
+});
+
+test('the harnesses can find the agent CLIs the shell installed', () => {
+  const home = '/Users/someone';
+  const env = { PATH: '/usr/bin:/bin' };
+  const present = new Set(['/usr/bin', '/bin', `${home}/.local/bin`]);
+  const result = agentEnv.ensureAgentPath(env, home, (dir) => present.has(dir));
+  assert.deepStrictEqual(result.added, [`${home}/.local/bin`], 'only real directories are added');
+  assert.strictEqual(env.PATH.split(path.delimiter)[0], `${home}/.local/bin`, 'the agent bin dir comes first');
+  assert.ok(env.PATH.endsWith('/usr/bin:/bin'), 'the inherited PATH is preserved');
+
+  const alreadyThere = { PATH: `${home}/.local/bin:/usr/bin` };
+  const second = agentEnv.ensureAgentPath(alreadyThere, home, () => true);
+  assert.ok(!second.added.includes(`${home}/.local/bin`), 'a directory already on the PATH is not added again');
+  const entries = alreadyThere.PATH.split(path.delimiter);
+  assert.strictEqual(entries.filter((dir) => dir === `${home}/.local/bin`).length, 1, 'no duplicate entry');
+  assert.ok(alreadyThere.PATH.endsWith(`${home}/.local/bin:/usr/bin`), 'the inherited entries keep their order');
+
+  const empty = { PATH: '' };
+  agentEnv.ensureAgentPath(empty, home, () => false);
+  assert.strictEqual(empty.PATH, '', 'a PATH is never invented when no directory exists');
+  assert.ok(agentEnv.candidateDirs(home).includes(`${home}/.local/bin`));
+});
+
+test('closing the window does not take the gateway down with it', () => {
+  const { shouldBlockQuit, CLOSE_TO_QUIT_WINDOW_MS } = require('../src/main/lifecycle');
+  const now = 100000;
+  assert.strictEqual(shouldBlockQuit({ authenticated: true, windowClosedAt: now - 100 }, now), true, 'the quit after a window close is blocked');
+  assert.strictEqual(shouldBlockQuit({ authenticated: false, windowClosedAt: now - 100 }, now), false, 'signed out, quitting is fine');
+  assert.strictEqual(shouldBlockQuit({ authenticated: true, windowClosedAt: 0 }, now), false, 'a quit with the window open goes through');
+  assert.strictEqual(shouldBlockQuit({ authenticated: true, quitting: true, windowClosedAt: now - 100 }, now), false);
+  assert.strictEqual(
+    shouldBlockQuit({ authenticated: true, windowClosedAt: now - CLOSE_TO_QUIT_WINDOW_MS - 1 }, now),
+    false,
+    'a later quit is not blocked forever',
+  );
 });
 
 test('a profile only accepts an API the router actually speaks', () => {

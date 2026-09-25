@@ -50,6 +50,9 @@ const { AccountService } = require('./accounts');
 const { Vault } = require('./vault');
 const { Settings } = require('./settings');
 const { registerIpc, result, failure } = require('./ipc');
+const lifecycle = require('./lifecycle');
+
+const lifecycleState = { authenticated: false, quitting: false, windowClosedAt: 0 };
 
 let accounts = null;
 let vault = null;
@@ -293,6 +296,11 @@ Module._load = function loadForRouter(request, parent, isMain) {
   return loaded;
 };
 
+const agentPath = require('./agent-env').ensureAgentPath();
+if (agentPath.added.length) {
+  log(`harness PATH extended with: ${agentPath.added.join(', ')}`);
+}
+
 log(`bootstrap starting (router asar: ${ROUTER_ASAR})`);
 if (!fs.existsSync(CCR_MAIN)) {
   log(`fatal: router main missing at ${CCR_MAIN}`);
@@ -353,10 +361,25 @@ app.whenReady()
   });
 
 app.on('window-all-closed', () => {
-  if (!authenticated) app.quit();
+  if (!authenticated) {
+    app.quit();
+    return;
+  }
+  // The agents keep talking to the gateway after the window is gone, so the
+  // quit that follows a window close is cancelled exactly once.
+  lifecycleState.windowClosedAt = Date.now();
+});
+
+app.on('before-quit', (event) => {
+  lifecycleState.authenticated = authenticated;
+  if (!lifecycle.shouldBlockQuit(lifecycleState)) return;
+  event.preventDefault();
+  lifecycleState.windowClosedAt = 0;
+  log('window close ignored: the gateway stays up for the harnesses');
 });
 
 app.on('activate', () => {
+  lifecycleState.windowClosedAt = 0;
   if (authenticated && mainWindow && !mainWindow.isDestroyed() && mainWindow.ccrInternals) {
     mainWindow.ccrInternals.real.show();
     mainWindow.ccrInternals.real.focus();
@@ -365,4 +388,4 @@ app.on('activate', () => {
   }
 });
 
-module.exports = { revealApp, lockApp, showAccountPage, bootstrap };
+module.exports = { revealApp, lockApp, showAccountPage, bootstrap, agentPath, lifecycleState };
