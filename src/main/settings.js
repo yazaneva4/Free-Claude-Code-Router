@@ -2,11 +2,10 @@
 
 const {
   ALL_PROVIDERS,
-  getProvider,
+  assertSupportedProvider,
   isForbiddenModelId,
   isSupportedApi,
   SUPPORTED_APIS,
-  FORBIDDEN_PROVIDER_IDS,
 } = require('./providers');
 
 const SETTINGS_FILE = 'settings.json';
@@ -158,21 +157,14 @@ class Settings {
   setRouting(patch) {
     const current = this.get();
     const next = { ...current.routing, ...(patch || {}) };
-    if (next.preferredProvider) {
-      const provider = getProvider(next.preferredProvider);
-      if (!provider) throw new Error('Unknown preferred provider.');
-      if (FORBIDDEN_PROVIDER_IDS.has(String(next.preferredProvider).toLowerCase())) {
-        throw new Error('That provider is not supported.');
-      }
-    }
+    if (next.preferredProvider) assertSupportedProvider(next.preferredProvider);
     if (Array.isArray(next.fallbackOrder)) {
-      next.fallbackOrder = next.fallbackOrder.filter((id) => Boolean(getProvider(id)));
+      for (const id of next.fallbackOrder) assertSupportedProvider(id);
     }
     if (next.modelByProvider && typeof next.modelByProvider === 'object') {
       const models = {};
       for (const [key, value] of Object.entries(next.modelByProvider)) {
-        if (!getProvider(key)) continue;
-        models[key] = cleanModel(value);
+        models[assertSupportedProvider(key).id] = cleanModel(value);
       }
       next.modelByProvider = models;
     }
@@ -180,7 +172,7 @@ class Settings {
   }
 
   setProvider(providerId, patch) {
-    const provider = getProvider(providerId);
+    const provider = assertSupportedProvider(providerId);
     if (!provider) throw new Error('Unknown provider.');
     const current = this.get();
     const existing = current.providers[provider.id] || {};

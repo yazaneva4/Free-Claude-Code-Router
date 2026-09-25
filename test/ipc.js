@@ -115,6 +115,31 @@ test('IPC never returns credential plaintext', async () => {
   assert.ok(!JSON.stringify(after).includes('sk-live'));
 });
 
+test('a credential can never be stored for an unsupported provider', async () => {
+  const h = build();
+  await h.call('auth:signup', GOOD);
+  for (const providerId of ['huggingface', 'hf', 'hugging-face', 'HF', 'hugging_face']) {
+    const err = await h.callFail('vault:save', { providerId, secret: 'hf_leaked_key' });
+    assert.strictEqual(err.code, 'unsupported_provider', `${providerId} must be refused`);
+  }
+  const unknown = await h.callFail('vault:save', { providerId: 'made-up', secret: 'sk-x' });
+  assert.strictEqual(unknown.code, 'unknown_provider');
+  const list = await h.call('vault:list');
+  assert.deepStrictEqual(list.credentials, [], 'nothing is stored for a provider we refuse');
+  const stored = JSON.stringify(h.store.read('vault.json', {}));
+  assert.ok(!stored.includes('hf_leaked_key'), 'the key never reaches disk');
+  const del = await h.callFail('vault:delete', { providerId: 'huggingface' });
+  assert.strictEqual(del.code, 'unsupported_provider');
+  for (const channel of ['providers:models', 'providers:probe']) {
+    const err = await h.callFail(channel, { providerId: 'hf/gpt' });
+    assert.strictEqual(err.code, 'unsupported_provider', `${channel} refuses it too`);
+  }
+  const routing = await h.callFail('settings:updateRouting', { preferredProvider: 'huggingface' });
+  assert.strictEqual(routing.code, 'unsupported_provider');
+  await h.call('vault:save', { providerId: 'openai', secret: 'sk-still-works' });
+  assert.strictEqual((await h.call('vault:list')).credentials.length, 1, 'supported providers still work');
+});
+
 test('vault:save refuses empty secrets and vault:delete removes', async () => {
   const h = build();
   await h.call('auth:signup', GOOD);
@@ -133,7 +158,9 @@ test('cloud providers demand a credential before listing models', async () => {
   const err = await h.callFail('providers:models', { providerId: 'openai' });
   assert.strictEqual(err.code, 'missing_credential');
   const unknown = await h.callFail('providers:models', { providerId: 'huggingface' });
-  assert.strictEqual(unknown.code, 'unknown_provider');
+  assert.strictEqual(unknown.code, 'unsupported_provider');
+  const madeUp = await h.callFail('providers:models', { providerId: 'made-up' });
+  assert.strictEqual(madeUp.code, 'unknown_provider');
 });
 
 test('local runtime probing works against the live Ollama on this machine', async () => {
@@ -155,7 +182,7 @@ test('routing and integration updates persist over IPC', async () => {
   const routed = await h.call('settings:updateRouting', { preferredProvider: 'lmstudio' });
   assert.strictEqual(routed.routing.preferredProvider, 'lmstudio');
   const bad = await h.callFail('settings:updateRouting', { preferredProvider: 'huggingface' });
-  assert.ok(/Unknown preferred provider/.test(bad.message));
+  assert.ok(/not a supported provider/.test(bad.message), 'an unsupported provider is named as such');
   const integration = await h.call('settings:updateIntegration', { kind: 'cli', name: 'claudeCode', patch: { enabled: true } });
   assert.strictEqual(integration.integrations.cli.claudeCode.enabled, true);
 });

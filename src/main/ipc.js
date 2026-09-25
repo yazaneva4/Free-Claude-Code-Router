@@ -95,20 +95,21 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
     if (typeof payload.secret !== 'string' || payload.secret.length === 0) {
       throw Object.assign(new Error('A credential value is required to store or replace it.'), { code: 'invalid_secret' });
     }
-    return vault.set(active.account.id, payload);
+    const provider = providers.assertSupportedProvider(payload.providerId);
+    const label = typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim().slice(0, 60) : provider.name;
+    return vault.set(active.account.id, { providerId: provider.id, secret: payload.secret, label });
   });
 
   handle(ipcMain, 'vault:delete', (payload) => {
     const active = session();
-    return vault.delete(active.account.id, payload.providerId);
+    return vault.delete(active.account.id, providers.assertSupportedProvider(payload.providerId).id);
   });
 
   handle(ipcMain, 'providers:catalog', () => providers.catalog());
 
   handle(ipcMain, 'providers:probe', async (payload) => {
     const active = session();
-    const provider = providers.getProvider(payload.providerId);
-    if (!provider) throw Object.assign(new Error('Unknown provider.'), { code: 'unknown_provider' });
+    const provider = providers.assertSupportedProvider(payload.providerId);
     const secret = provider.requiresCredential ? vault.secret(active.account.id, provider.id) : null;
     const configured = settings.get().providers[provider.id] || {};
     return providers.probe(provider.id, { secret, baseUrl: payload.baseUrl || configured.baseUrl });
@@ -116,8 +117,7 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
 
   handle(ipcMain, 'providers:models', async (payload) => {
     const active = session();
-    const provider = providers.getProvider(payload.providerId);
-    if (!provider) throw Object.assign(new Error('Unknown provider.'), { code: 'unknown_provider' });
+    const provider = providers.assertSupportedProvider(payload.providerId);
     const secret = provider.requiresCredential ? vault.secret(active.account.id, provider.id) : null;
     const configured = settings.get().providers[provider.id] || {};
     if (provider.requiresCredential && !secret) {

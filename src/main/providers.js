@@ -49,6 +49,16 @@ const ALL_PROVIDERS = [...LOCAL_PROVIDERS, ...CLOUD_PROVIDERS];
 const BY_ID = new Map(ALL_PROVIDERS.map((p) => [p.id, p]));
 
 const FORBIDDEN_PROVIDER_IDS = new Set(['huggingface', 'hf', 'hugging-face']);
+const FORBIDDEN_PROVIDER_PATTERN = /^(?:hugging[\s_.-]?face|hf)(?:[^a-z]|$)/;
+
+function providerNamespace(providerId) {
+  const id = String(providerId || '').trim().toLowerCase();
+  return id.includes('/') ? id.slice(0, id.indexOf('/')) : id;
+}
+
+function isForbiddenProviderId(providerId) {
+  return FORBIDDEN_PROVIDER_PATTERN.test(providerNamespace(providerId));
+}
 
 const SUPPORTED_APIS = ['openai_chat_completions', 'openai_responses', 'anthropic_messages'];
 const SUPPORTED_API_SET = new Set(SUPPORTED_APIS);
@@ -84,15 +94,24 @@ function usableBaseUrl(provider, baseUrl) {
 
 function getProvider(providerId) {
   const id = String(providerId || '').trim().toLowerCase();
-  if (FORBIDDEN_PROVIDER_IDS.has(id)) return null;
+  if (isForbiddenProviderId(id)) return null;
   return BY_ID.get(id) || null;
 }
 
+function assertSupportedProvider(providerId) {
+  const id = String(providerId || '').trim().toLowerCase();
+  if (isForbiddenProviderId(id)) {
+    throw Object.assign(new Error(`${providerNamespace(id) || id} is not a supported provider. This router does not use Hugging Face.`), { code: 'unsupported_provider' });
+  }
+  const provider = BY_ID.get(id) || null;
+  if (!provider) {
+    throw Object.assign(new Error(`Unknown provider. Supported providers: ${ALL_PROVIDERS.map((p) => p.id).join(', ')}.`), { code: 'unknown_provider' });
+  }
+  return provider;
+}
+
 function isForbiddenModelId(modelId) {
-  const id = String(modelId || '').trim().toLowerCase();
-  if (FORBIDDEN_PROVIDER_IDS.has(id)) return true;
-  const namespace = id.includes('/') ? id.slice(0, id.indexOf('/')) : '';
-  return Boolean(namespace) && FORBIDDEN_PROVIDER_IDS.has(namespace);
+  return isForbiddenProviderId(modelId);
 }
 
 function publicProvider(provider) {
@@ -156,8 +175,7 @@ function normalizeModels(body) {
 }
 
 async function listModels(providerId, { secret = null, baseUrl = null, timeoutMs = 6000 } = {}) {
-  const provider = getProvider(providerId);
-  if (!provider) throw new Error('Unknown provider.');
+  const provider = assertSupportedProvider(providerId);
   const base = usableBaseUrl(provider, baseUrl);
   const headers = { accept: 'application/json' };
   if (secret) headers.authorization = `Bearer ${secret}`;
@@ -203,6 +221,9 @@ module.exports = {
   SUPPORTED_APIS,
   isSupportedApi,
   getProvider,
+  assertSupportedProvider,
+  isForbiddenProviderId,
+  providerNamespace,
   isForbiddenModelId,
   isLoopbackHost,
   usableBaseUrl,

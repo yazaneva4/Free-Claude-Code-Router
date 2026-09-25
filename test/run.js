@@ -302,16 +302,50 @@ test('model normalization handles ollama and openai shapes', () => {
   assert.deepStrictEqual(tags.map((m) => m.id), ['qwen2.5']);
 });
 
-test('settings default to local providers and refuse unknown or forbidden routing', () => {
+test('settings default to local providers and refuse unsupported or unknown routing', () => {
   const h = harness();
   const defaults = h.settings.get();
   assert.strictEqual(defaults.routing.preferredProvider, 'ollama');
   assert.deepStrictEqual(defaults.routing.fallbackOrder, ['lmstudio', 'ollama', 'llamacpp']);
-  assert.throws(() => h.settings.setRouting({ preferredProvider: 'huggingface' }), /Unknown preferred provider/);
-  assert.throws(() => h.settings.setRouting({ preferredProvider: 'made-up' }), /Unknown preferred provider/);
-  const updated = h.settings.setRouting({ preferredProvider: 'llamacpp', fallbackOrder: ['llamacpp', 'huggingface'] });
+  assert.throws(() => h.settings.setRouting({ preferredProvider: 'huggingface' }), (err) => err.code === 'unsupported_provider');
+  assert.throws(() => h.settings.setRouting({ preferredProvider: 'made-up' }), (err) => err.code === 'unknown_provider');
+  const updated = h.settings.setRouting({ preferredProvider: 'llamacpp', fallbackOrder: ['llamacpp', 'ollama'] });
   assert.strictEqual(updated.routing.preferredProvider, 'llamacpp');
-  assert.deepStrictEqual(updated.routing.fallbackOrder, ['llamacpp'], 'unknown providers are dropped from fallback');
+  assert.deepStrictEqual(updated.routing.fallbackOrder, ['llamacpp', 'ollama']);
+  assert.throws(() => h.settings.setRouting({ fallbackOrder: ['llamacpp', 'huggingface'] }), (err) => err.code === 'unsupported_provider');
+  assert.throws(() => h.settings.setRouting({ modelByProvider: { 'hf/gpt': 'x' } }), (err) => err.code === 'unsupported_provider');
+  assert.deepStrictEqual(h.settings.get().routing.fallbackOrder, ['llamacpp', 'ollama'], 'a refused routing patch changes nothing');
+});
+
+test('an unsupported provider is refused everywhere it could be added', async () => {
+  const h = harness();
+  const banned = ['huggingface', 'hf', 'hugging-face', 'hugging_face', 'HuggingFace', 'hf.co/x', 'HF'];
+  for (const id of banned) {
+    assert.ok(providers.isForbiddenProviderId(id), `${id} counts as unsupported`);
+    assert.strictEqual(providers.getProvider(id), null, `${id} has no provider record`);
+    assert.throws(
+      () => h.settings.setProvider(id, { enabled: true }),
+      (err) => err.code === 'unsupported_provider',
+      `settings must refuse ${id}`,
+    );
+    assert.throws(
+      () => providers.assertSupportedProvider(id),
+      (err) => err.code === 'unsupported_provider',
+      `the catalog must refuse ${id}`,
+    );
+  }
+  assert.throws(() => h.settings.setProvider('made-up', {}), (err) => err.code === 'unknown_provider');
+  await assert.rejects(() => providers.listModels('huggingface'), (err) => err.code === 'unsupported_provider');
+  await assert.rejects(() => providers.listModels('made-up'), (err) => err.code === 'unknown_provider');
+
+  for (const model of ['hf/gpt-oss-120b', 'huggingface/gpt', 'HF/anything', 'hugging-face/x']) {
+    assert.ok(providers.isForbiddenModelId(model), `${model} is a forbidden model`);
+  }
+  for (const model of ['gpt-4o', 'qwen3-coder', 'llama3.3', 'gemini-2.5-pro']) {
+    assert.ok(!providers.isForbiddenModelId(model), `${model} is a legitimate model`);
+  }
+  const listed = providers.ALL_PROVIDERS.map((p) => p.id);
+  for (const id of banned) assert.ok(!listed.includes(id.toLowerCase()), 'the catalog never offers it');
 });
 
 test('a profile only accepts an API the router actually speaks', () => {
@@ -369,7 +403,7 @@ test('provider and integration settings persist per provider', () => {
   h.settings.setIntegration('cli', 'claudeCode', { enabled: true, model: 'ollama/llama3.2' });
   assert.strictEqual(h.settings.get().integrations.cli.claudeCode.model, 'ollama/llama3.2');
   assert.throws(() => h.settings.setIntegration('cli', 'nope', {}), /Unknown integration/);
-  assert.throws(() => h.settings.setProvider('huggingface', {}), /Unknown provider/);
+  assert.throws(() => h.settings.setProvider('huggingface', {}), (err) => err.code === 'unsupported_provider');
 });
 
 test('app and CLI integrations are all present', () => {
