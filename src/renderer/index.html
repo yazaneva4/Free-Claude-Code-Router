@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Claude Code Router — Account</title>
+    <link rel="stylesheet" href="css/main.css" />
+  </head>
+  <body class="account-body">
+    <div id="toast" class="toast" hidden></div>
+
+    <div class="progress" id="progress" hidden>
+      <span class="step" data-progress="1">1. Account</span>
+      <span class="step" data-progress="2">2. Sync</span>
+      <span class="step" data-progress="3">3. Harnesses</span>
+    </div>
+
+    <section id="view-auth" class="pane" hidden>
+      <div class="brandmark">Claude Code Router</div>
+      <p class="muted center" id="gate-subtitle">Sign in to open your router. Guest access is not available.</p>
+
+      <div class="tabs">
+        <button class="tab is-active" data-gate-tab="login" type="button">Sign in</button>
+        <button class="tab" data-gate-tab="signup" type="button">Create account</button>
+      </div>
+
+      <form id="form-login" class="form">
+        <label>Email<input name="email" type="email" autocomplete="username" required /></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
+        <p class="error" data-error hidden></p>
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+
+      <form id="form-signup" class="form" hidden>
+        <label>Display name<input name="displayName" type="text" autocomplete="name" required /></label>
+        <label>Email<input name="email" type="email" autocomplete="username" required /></label>
+        <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="10" /></label>
+        <p class="hint">Passwords are hashed with scrypt and secrets are encrypted. Nothing is stored in the clear.</p>
+        <p class="error" data-error hidden></p>
+        <button class="primary" type="submit">Create account</button>
+      </form>
+    </section>
+
+    <section id="view-sync" class="pane" hidden>
+      <div class="brandmark">Where should this account live?</div>
+      <p class="muted center">You are asked this once on every device you sign in from.</p>
+
+      <form id="form-sync" class="form">
+        <label class="choice">
+          <input type="radio" name="storageMode" value="device" checked />
+          <span>
+            <strong>This device only</strong>
+            <em>Secrets stay encrypted on this Mac. Nothing is uploaded.</em>
+          </span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="storageMode" value="synced" />
+          <span>
+            <strong>Synced across devices</strong>
+            <em>Needs an https:// sync endpoint you control.</em>
+          </span>
+        </label>
+        <label id="sync-endpoint-field" hidden
+          >Sync endpoint<input name="syncEndpoint" type="url" placeholder="https://" />
+        </label>
+        <p class="error" data-error hidden></p>
+        <button class="primary" type="submit">Continue</button>
+      </form>
+    </section>
+
+    <section id="view-harness" class="pane wide-pane" hidden>
+      <div class="brandmark">Pick your harnesses</div>
+      <p class="muted center">
+        Harnesses that need a paid plan are routed through your router instead, so no third-party login is
+        collected. The ones that run free keep their own built-in models.
+      </p>
+
+      <form id="form-harness" class="stack">
+        <div id="harness-list" class="stack"></div>
+        <p class="error" data-error hidden></p>
+        <button class="primary" type="submit">Finish setup</button>
+      </form>
+    </section>
+
+    <section id="view-account" class="pane" hidden>
+      <div class="brandmark">Account</div>
+      <p class="muted center" id="account-email"></p>
+
+      <form id="form-profile" class="form card">
+        <h3>Profile</h3>
+        <label>Display name<input name="displayName" type="text" required /></label>
+        <label
+          >Credential storage
+          <select name="storageMode">
+            <option value="device">This device only</option>
+            <option value="synced">Synced across devices</option>
+          </select>
+        </label>
+        <label>Sync endpoint<input name="syncEndpoint" type="url" placeholder="https://" /></label>
+        <p class="hint" id="encryption-note"></p>
+        <p class="error" data-error hidden></p>
+        <button class="primary" type="submit">Save profile</button>
+      </form>
+
+      <form id="form-password" class="form card">
+        <h3>Password</h3>
+        <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required /></label>
+        <label>New password<input name="newPassword" type="password" autocomplete="new-password" required minlength="10" /></label>
+        <p class="error" data-error hidden></p>
+        <button class="primary" type="submit">Replace password</button>
+      </form>
+
+      <div class="card">
+        <button id="btn-back-router" class="primary wide" type="button">Back to router</button>
+        <button id="btn-logout" class="ghost wide spaced" type="button">Sign out</button>
+      </div>
+
+      <div class="card danger-zone">
+        <h3>Danger zone</h3>
+        <p class="hint">Deleting the account signs you out and erases its stored secrets on this device.</p>
+        <button id="btn-delete-account" class="danger-btn" type="button">Delete account</button>
+      </div>
+    </section>
+
+    <script src="js/account.js"></script>
+  </body>
+</html>

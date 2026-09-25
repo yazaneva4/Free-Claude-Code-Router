@@ -1,0 +1,430 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --line: #2a2f3a;
+  --text: #e8eaf0;
+  --muted: #98a0b3;
+  --accent: #5b8cff;
+  --ok: #3ecf8e;
+  --warn: #f0b429;
+  --err: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 24px 0 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.error {
+  color: var(--err);
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 28px;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0 14px;
+}
+
+.tab {
+  flex: 1;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab.is-active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+label.inline {
+  display: inline-grid;
+  min-width: 240px;
+}
+
+input,
+select {
+  padding: 9px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  padding: 10px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.ghost {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.danger-btn {
+  padding: 9px 14px;
+  background: transparent;
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  color: var(--err);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand {
+  font-weight: 700;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.nav-btn {
+  padding: 7px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.nav-btn.is-active {
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+main {
+  padding: 20px 24px 48px;
+  max-width: 1080px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.card.danger {
+  border-color: #46262c;
+}
+
+.provider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.badge.ok {
+  color: var(--ok);
+  border-color: #1d4c39;
+}
+
+.badge.err {
+  color: var(--err);
+  border-color: #4a2626;
+}
+
+.badge.busy {
+  color: var(--warn);
+  border-color: #4a3f1d;
+}
+
+.model-list {
+  max-height: 190px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.model-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.model-row:last-child {
+  border-bottom: none;
+}
+
+.cred-form {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.toast {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  max-width: 380px;
+}
+
+.toast.err {
+  border-color: #4a2626;
+  color: var(--err);
+}
+
+.account-body {
+  padding: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+body.no-scroll {
+  overflow: hidden;
+}
+
+#view-auth {
+  flex: 1 1 auto;
+  align-content: center;
+  gap: 10px;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+#view-auth .brandmark {
+  margin-top: 0;
+}
+
+#view-auth .tabs {
+  margin: 12px 0 10px;
+}
+
+.pane {
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 28px 24px 40px;
+  display: grid;
+  gap: 12px;
+}
+
+.brandmark {
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  margin-top: 8px;
+}
+
+.center {
+  text-align: center;
+  margin: 0 0 8px;
+}
+
+h3 {
+  font-size: 13px;
+  margin: 0 0 4px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wide {
+  width: 100%;
+}
+
+.spaced {
+  margin-top: 8px;
+}
+
+.danger-zone {
+  border-color: #46262c;
+}
+
+.wide-pane {
+  max-width: 620px;
+}
+
+.progress {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  justify-content: center;
+  padding: 14px 24px 0;
+}
+
+.progress .step {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.progress .step.is-active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+label.choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+}
+
+label.choice em {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.harness {
+  display: grid;
+  gap: 8px;
+}
+
+.toggle {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
