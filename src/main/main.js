@@ -20,9 +20,11 @@ const ROUTER_HOME = path.join(ROUTER_ASAR, 'dist', 'renderer', 'pages', 'home', 
 const ACCOUNT_PAGE = path.join(__dirname, '..', 'renderer', 'index.html');
 const ACCOUNT_URL = pathToFileURL(ACCOUNT_PAGE).toString();
 const ROUTER_URL = pathToFileURL(ROUTER_HOME).toString();
+const RESOURCES_URL = decodeURIComponent(pathToFileURL(CCR_RESOURCES).toString()).replace(/\/$/, '');
 const CHAINED_PRELOAD = path.join(__dirname, '..', 'preload', 'chained.js');
 const HOME_DIR = os.homedir();
 const CCR_HOME = path.join(HOME_DIR, '.claude-code-router');
+const USER_DATA = process.env.CCR_INTERNAL_USER_DATA_DIR || process.env.CCR_USER_DATA || path.join(CCR_HOME, 'app-data');
 const AUTH_DIR = process.env.CCR_AUTH_DIR || path.join(CCR_HOME, 'auth');
 const LOG_FILE = path.join(CCR_HOME, 'gate.log');
 const SELFTEST = process.env.CCR_SELFTEST === '1';
@@ -39,7 +41,7 @@ function log(message) {
 
 app.setName('Claude Code Router');
 try {
-  app.setPath('userData', process.env.CCR_USER_DATA || path.join(CCR_HOME, 'app-data'));
+  app.setPath('userData', USER_DATA);
 } catch {}
 
 const { Store } = require('./store');
@@ -69,6 +71,16 @@ function createServices() {
 function isPageUrl(url) {
   const bare = String(url || '').split('#')[0].split('?')[0];
   return bare === ACCOUNT_URL || bare === ROUTER_URL;
+}
+
+function isBundledUrl(url) {
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(String(url)).pathname);
+  } catch {
+    return false;
+  }
+  return pathname === RESOURCES_URL || pathname.startsWith(`${RESOURCES_URL}/`);
 }
 
 function adoptRouterWindow(win) {
@@ -103,9 +115,7 @@ function adoptRouterWindow(win) {
   };
 
   win.show = () => (authenticated ? real.show() : showAccountPage());
-  win.focus = () => {
-    if (authenticated) real.focus();
-  };
+  win.focus = () => real.focus();
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -114,6 +124,7 @@ function adoptRouterWindow(win) {
 
   win.webContents.on('will-navigate', (event, url) => {
     if (isPageUrl(url)) return;
+    if (authenticated && isBundledUrl(url)) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   });
@@ -177,9 +188,13 @@ function revealApp() {
 
 function lockApp() {
   if (accounts) accounts.logout();
+  return onSessionEnded('locked');
+}
+
+function onSessionEnded(reason) {
   authenticated = false;
   currentPage = null;
-  log('locked: session cleared, account page shown');
+  log(`session ended (${reason}) - router held back, account page shown`);
   return showAccountPage();
 }
 
@@ -220,7 +235,7 @@ function addGateMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function whenWindow(timeoutMs = 15000) {
+function whenWindow(timeoutMs = 30000) {
   if (mainWindow && !mainWindow.isDestroyed()) return Promise.resolve(mainWindow);
   return new Promise((resolve, reject) => {
     const started = Date.now();
@@ -282,9 +297,10 @@ log(`bootstrap starting (router asar: ${ROUTER_ASAR})`);
 if (!fs.existsSync(CCR_MAIN)) {
   log(`fatal: router main missing at ${CCR_MAIN}`);
   app.quit();
+} else {
+  require(CCR_MAIN);
+  log('router main loaded');
 }
-require(CCR_MAIN);
-log('router main loaded');
 
 ipcMain.handle('gate:reveal', async () => {
   try {
@@ -296,7 +312,7 @@ ipcMain.handle('gate:reveal', async () => {
 
 async function bootstrap() {
   const services = createServices();
-  registerIpc({ ipcMain, ...services });
+  registerIpc({ ipcMain, onSessionEnded, ...services });
 
   let win;
   try {
@@ -329,16 +345,21 @@ async function bootstrap() {
   }
 }
 
-app.whenReady().then(bootstrap);
+app.whenReady()
+  .then(bootstrap)
+  .catch((err) => {
+    log(`fatal: ${err && err.stack ? err.stack : err}`);
+    app.quit();
+  });
 
 app.on('window-all-closed', () => {
   if (!authenticated) app.quit();
 });
 
 app.on('activate', () => {
-  if (authenticated && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.gate.real.show();
-    mainWindow.gate.real.focus();
+  if (authenticated && mainWindow && !mainWindow.isDestroyed() && mainWindow.ccrInternals) {
+    mainWindow.ccrInternals.real.show();
+    mainWindow.ccrInternals.real.focus();
   } else {
     showAccountPage();
   }

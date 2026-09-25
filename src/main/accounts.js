@@ -1,5 +1,7 @@
 'use strict';
 
+const { isPlainObject } = require('./store');
+
 const {
   hashPassword,
   verifyPassword,
@@ -143,8 +145,19 @@ class AccountService {
 
   session() {
     const raw = this.store.read(SESSION_FILE, null);
-    if (!raw || !raw.accountId || !raw.token) return null;
+    if (!isPlainObject(raw) || !raw.accountId || !raw.token) return null;
     if (!raw.expiresAt || raw.expiresAt <= this.now()) {
+      this.store.remove(SESSION_FILE);
+      return null;
+    }
+    let token = null;
+    try {
+      token = this.crypto.decrypt(raw.token);
+    } catch {
+      this.store.remove(SESSION_FILE);
+      return null;
+    }
+    if (!token) {
       this.store.remove(SESSION_FILE);
       return null;
     }

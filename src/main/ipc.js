@@ -23,8 +23,11 @@ function handle(ipcMain, channel, fn) {
   });
 }
 
-function registerIpc({ ipcMain, accounts, vault, settings, crypto }) {
+function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnded = null }) {
   const session = () => accounts.requireSession();
+  const endSession = async (reason) => {
+    if (typeof onSessionEnded === 'function') await onSessionEnded(reason);
+  };
 
   handle(ipcMain, 'auth:bootstrap', () => {
     const active = accounts.session();
@@ -46,7 +49,13 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto }) {
   });
 
   handle(ipcMain, 'auth:login', (payload) => accounts.login(payload));
-  handle(ipcMain, 'auth:logout', () => accounts.logout());
+
+  handle(ipcMain, 'auth:logout', async () => {
+    const result = accounts.logout();
+    await endSession('signed out');
+    return result;
+  });
+
   handle(ipcMain, 'auth:session', () => accounts.session());
 
   handle(ipcMain, 'onboarding:saveSync', (payload) => {
@@ -70,7 +79,11 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto }) {
     return accounts.updateProfile(payload);
   });
 
-  handle(ipcMain, 'account:delete', () => accounts.deleteAccount());
+  handle(ipcMain, 'account:delete', async () => {
+    const result = accounts.deleteAccount();
+    await endSession('account deleted');
+    return result;
+  });
 
   handle(ipcMain, 'vault:list', () => {
     const active = session();
@@ -111,11 +124,6 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto }) {
       throw Object.assign(new Error(`Add your ${provider.credentialLabel} in Settings first.`), { code: 'missing_credential' });
     }
     const found = await providers.probe(provider.id, { secret, baseUrl: payload.baseUrl || configured.baseUrl });
-    if (found.reachable && configured.autoFetchModels !== false) {
-      const current = settings.get();
-      current.routing.modelByProvider[provider.id] = current.routing.modelByProvider[provider.id] || null;
-      settings.save(current);
-    }
     return found;
   });
 

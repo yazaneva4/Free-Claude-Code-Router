@@ -145,7 +145,12 @@ async function openRouter() {
   const result = await api.reveal();
   if (!result.revealed) {
     toast(`The router did not open: ${result.reason}`, true);
-    showView('#view-auth');
+    if (state.boot && state.boot.signedIn) {
+      fillAccountView();
+      showView('#view-account');
+    } else {
+      showView('#view-auth');
+    }
     return;
   }
   toast('Signed in');

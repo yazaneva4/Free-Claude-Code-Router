@@ -15,15 +15,27 @@ const harnesses = require('../src/main/harnesses');
 
 let passed = 0;
 let failed = 0;
+const pending = [];
 
 function test(name, fn) {
+  const record = (ok, err) => {
+    if (ok) {
+      passed += 1;
+      console.log(`ok   ${name}`);
+    } else {
+      failed += 1;
+      console.error(`FAIL ${name}: ${err && err.message ? err.message : err}`);
+    }
+  };
   try {
-    fn();
-    passed += 1;
-    console.log(`ok   ${name}`);
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      pending.push(result.then(() => record(true), (err) => record(false, err)));
+      return;
+    }
+    record(true);
   } catch (err) {
-    failed += 1;
-    console.error(`FAIL ${name}: ${err && err.message ? err.message : err}`);
+    record(false, err);
   }
 }
 
@@ -113,6 +125,44 @@ test('expired sessions are rejected and cleared', () => {
   clock += 31 * 24 * 60 * 60 * 1000;
   assert.strictEqual(h.accounts.session(), null, 'session must expire');
   assert.strictEqual(h.accounts.store.exists('session.json'), false, 'expired session file is removed');
+});
+
+test('a session file with an unreadable token or an unknown account is refused', () => {
+  const h = harness();
+  h.accounts.signup(GOOD);
+  const real = JSON.parse(fs.readFileSync(h.store.file('session.json'), 'utf8'));
+
+  h.store.write('session.json', { ...real, token: 'not-even-encrypted' });
+  assert.strictEqual(h.accounts.session(), null, 'a token that fails its integrity check is refused');
+  assert.strictEqual(h.accounts.store.exists('session.json'), false, 'the bad session file is cleared');
+
+  h.store.write('session.json', { ...real, token: real.token, accountId: 'made-up-account' });
+  assert.strictEqual(h.accounts.session(), null, 'a session for an account that does not exist is refused');
+
+  h.store.write('session.json', 'null');
+  assert.strictEqual(h.accounts.session(), null, 'a null session file is refused');
+  assert.throws(() => h.accounts.requireSession(), (err) => err.code === 'signed_out');
+});
+
+test('a corrupt or non-object store file falls back instead of crashing', () => {
+  const h = harness();
+  h.accounts.signup(GOOD);
+  assert.ok(h.accounts.session(), 'a healthy session still works');
+
+  fs.writeFileSync(h.store.file('accounts.json'), '{ this is not json');
+  assert.doesNotThrow(() => h.accounts.count());
+  assert.strictEqual(h.accounts.count(), 0, 'a corrupt account file reads as empty');
+  assert.ok(fs.existsSync(h.store.file('accounts.json.corrupt')), 'the unreadable file is kept for inspection');
+
+  fs.writeFileSync(h.store.file('accounts.json'), 'null');
+  assert.strictEqual(h.accounts.count(), 0, 'a null account file reads as empty');
+
+  fs.writeFileSync(h.store.file('device.json'), '[]');
+  assert.strictEqual(h.accounts.device().syncChoiceAskedAt, null, 'a non-object device file reads as defaults');
+
+  fs.writeFileSync(h.store.file('settings.json'), '"a string"');
+  assert.ok(h.settings.get().routing, 'settings fall back to defaults');
+  assert.doesNotThrow(() => h.vault.list('nobody'));
 });
 
 test('change password requires the current one and refuses reuse', () => {
@@ -216,6 +266,36 @@ test('the three local runtimes are configured on the right ports', () => {
   assert.strictEqual(providers.getProvider('llamacpp').baseUrl, 'http://127.0.0.1:8080/v1');
 });
 
+test('a stored credential is never sent to a host the user did not configure', () => {
+  const openai = providers.getProvider('openai');
+  assert.strictEqual(providers.usableBaseUrl(openai, null), 'https://api.openai.com/v1');
+  assert.strictEqual(
+    providers.usableBaseUrl(openai, 'https://api.openai.com/v1/'),
+    'https://api.openai.com/v1',
+    'the provider endpoint itself is always allowed',
+  );
+  assert.strictEqual(
+    providers.usableBaseUrl(providers.getProvider('ollama'), 'http://127.0.0.1:11434/v1'),
+    'http://127.0.0.1:11434/v1',
+    'a different local port is allowed for local runtimes',
+  );
+  assert.strictEqual(
+    providers.usableBaseUrl(providers.getProvider('ollama'), 'http://localhost:9999/v1'),
+    'http://localhost:9999/v1',
+    'localhost is a loopback address',
+  );
+  assert.throws(() => providers.usableBaseUrl(openai, 'https://evil.example.com/v1'), /credential/i);
+  assert.throws(() => providers.usableBaseUrl(openai, 'http://169.254.169.254/latest'), /credential/i);
+  assert.throws(() => providers.usableBaseUrl(openai, 'file:///etc/passwd'), /http/i);
+  assert.throws(() => providers.usableBaseUrl(providers.getProvider('ollama'), 'not a url'), /http/i);
+});
+
+test('probing a forbidden host reports the refusal instead of leaking the key', async () => {
+  const result = await providers.probe('openai', { secret: 'sk-test-value', baseUrl: 'https://evil.example.com/v1' });
+  assert.strictEqual(result.reachable, false);
+  assert.ok(/credential/i.test(result.error), `expected a refusal, got: ${result.error}`);
+});
+
 test('model normalization handles ollama and openai shapes', () => {
   assert.deepStrictEqual(providers.normalizeModels({ data: [{ id: 'llama3.2:1b' }] }), [{ id: 'llama3.2:1b', ownedBy: null, contextWindow: null }]);
   const tags = providers.normalizeModels({ models: [{ name: 'qwen2.5', model: 'qwen2.5' }] });
@@ -232,6 +312,54 @@ test('settings default to local providers and refuse unknown or forbidden routin
   const updated = h.settings.setRouting({ preferredProvider: 'llamacpp', fallbackOrder: ['llamacpp', 'huggingface'] });
   assert.strictEqual(updated.routing.preferredProvider, 'llamacpp');
   assert.deepStrictEqual(updated.routing.fallbackOrder, ['llamacpp'], 'unknown providers are dropped from fallback');
+});
+
+test('a profile only accepts an API the router actually speaks', () => {
+  const h = harness();
+  assert.deepStrictEqual(providers.SUPPORTED_APIS, ['openai_chat_completions', 'openai_responses', 'anthropic_messages']);
+  assert.ok(providers.isSupportedApi('openai_responses'));
+  assert.ok(!providers.isSupportedApi('openai_completions'), 'a near-miss is not supported');
+  assert.ok(!providers.isSupportedApi(''));
+  assert.ok(providers.catalog().apis.includes('anthropic_messages'), 'the catalog advertises the supported APIs');
+
+  for (const api of providers.SUPPORTED_APIS) {
+    h.settings.setProvider('ollama', { api });
+    assert.strictEqual(h.settings.get().providers.ollama.api, api, `${api} is accepted`);
+  }
+  for (const api of ['huggingface', 'openai_completions', 'gemini_generate_content', 'OpenAI_Responses', 'anything']) {
+    assert.throws(
+      () => h.settings.setProvider('ollama', { api }),
+      (err) => err.code === 'unsupported_api',
+      `${api} must be refused`,
+    );
+  }
+  assert.throws(() => h.settings.setIntegration('cli', 'gemini', { api: 'made_up' }), (err) => err.code === 'unsupported_api');
+});
+
+test('profile edits are limited to the keys and types we support', () => {
+  const h = harness();
+  h.settings.setProvider('openai', { enabled: true, baseUrl: 'https://proxy.internal/v1/', api: 'anthropic_messages' });
+  const provider = h.settings.get().providers.openai;
+  assert.strictEqual(provider.baseUrl, 'https://proxy.internal/v1', 'a trailing slash is trimmed');
+  assert.strictEqual(provider.api, 'anthropic_messages');
+
+  h.settings.setProvider('openai', { secret: 'sk-leaked', id: 'evil', unknown: true });
+  const cleaned = h.settings.get().providers.openai;
+  assert.strictEqual(cleaned.secret, undefined, 'unknown keys never reach the settings file');
+  assert.strictEqual(cleaned.id, undefined);
+  assert.strictEqual(cleaned.unknown, undefined);
+
+  assert.throws(() => h.settings.setProvider('openai', { baseUrl: 'file:///etc/passwd' }), (err) => err.code === 'invalid_base_url');
+  assert.throws(() => h.settings.setProvider('openai', { baseUrl: 'not a url' }), (err) => err.code === 'invalid_base_url');
+  assert.throws(() => h.settings.setProvider('openai', { enabled: 'yes' }), (err) => err.code === 'invalid_value');
+
+  h.settings.setIntegration('cli', 'gemini', { model: 'gemini-2.5-pro', configPath: '~/.gemini' });
+  assert.strictEqual(h.settings.get().integrations.cli.gemini.model, 'gemini-2.5-pro');
+  assert.throws(() => h.settings.setIntegration('cli', 'gemini', { model: 'huggingface/gpt' }), (err) => err.code === 'forbidden_model');
+  assert.throws(() => h.settings.setIntegration('cli', 'gemini', { enabled: 1 }), (err) => err.code === 'invalid_value');
+  assert.throws(() => h.settings.setIntegration('cli', 'gemini', { configPath: 'a\nb' }), (err) => err.code === 'invalid_value');
+  assert.throws(() => h.settings.setRouting({ modelByProvider: { ollama: 'hf/evil' } }), (err) => err.code === 'forbidden_model');
+  assert.deepStrictEqual(h.settings.get().routing.modelByProvider, {}, 'a rejected routing patch changes nothing');
 });
 
 test('provider and integration settings persist per provider', () => {
@@ -338,8 +466,14 @@ test('harness catalog flags paid harnesses and keeps built-in models for the fre
   assert.strictEqual(gemini.billing, 'free');
   assert.deepStrictEqual(gemini.builtInModels, ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash']);
   const paid = catalog.filter((harness) => harness.billing === 'required');
-  assert.strictEqual(paid.length, 4);
+  assert.deepStrictEqual(paid.map((harness) => harness.id), ['claude-code'], 'only Claude Code needs a paid plan');
   assert.ok(paid.every((harness) => harness.builtInModels.length === 0), 'paid harnesses get no built-in models');
+  const free = catalog.filter((harness) => harness.billing === 'free');
+  assert.deepStrictEqual(
+    free.map((harness) => harness.id),
+    ['claude-app', 'codex-app', 'codex-cli', 'gemini-cli'],
+    'Claude, Codex and Gemini all run on the free plan',
+  );
   assert.ok(catalog.every((harness) => harness.target && harness.target.kind && harness.target.name));
 });
 
@@ -367,5 +501,7 @@ test('harness selections ignore unknown harnesses entirely', () => {
   assert.strictEqual(h.settings.get().integrations.cli.gemini.enabled, false);
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+Promise.all(pending).then(() => {
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+});

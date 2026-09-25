@@ -13,15 +13,31 @@ function ensureDir(dir) {
   } catch {}
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function readJson(file, fallback) {
+  let raw;
   try {
-    const raw = fs.readFileSync(file, 'utf8');
-    if (!raw.trim()) return fallback;
-    return JSON.parse(raw);
+    raw = fs.readFileSync(file, 'utf8');
   } catch (err) {
     if (err && err.code === 'ENOENT') return fallback;
     throw err;
   }
+  if (!raw.trim()) return fallback;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    try {
+      fs.copyFileSync(file, `${file}.corrupt`);
+    } catch {}
+    return fallback;
+  }
+  if (parsed === null || parsed === undefined) return fallback;
+  if (isPlainObject(fallback) && !isPlainObject(parsed)) return fallback;
+  return parsed;
 }
 
 function writeJson(file, value) {
@@ -66,4 +82,4 @@ class Store {
   }
 }
 
-module.exports = { Store, ensureDir, readJson, writeJson, FILE_MODE, DIR_MODE };
+module.exports = { Store, ensureDir, readJson, writeJson, isPlainObject, FILE_MODE, DIR_MODE };

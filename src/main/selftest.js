@@ -110,20 +110,35 @@ async function run(win, results, logFile) {
 
   const harnessView = await win.webContents.executeJavaScript(`(() => {
     const cards = Array.from(document.querySelectorAll('#harness-list .harness'));
+    const isFree = (card) => card.querySelector('.badge').textContent === 'No payment';
+    const models = (card) => Array.from(card.querySelectorAll('select[name=model] option')).map((option) => option.value);
     return {
       count: cards.length,
       names: cards.map((card) => card.querySelector('.provider-head div').textContent),
-      free: cards.filter((card) => card.querySelector('.badge').textContent === 'No payment').map((card) => card.dataset.harness),
-      paid: cards.filter((card) => card.querySelector('.badge').textContent === 'Payment required').map((card) => card.dataset.harness),
-      paidWithPassword: cards.filter((card) => card.querySelector('.badge').textContent === 'Payment required').some((card) => card.querySelector('input[type=password]')),
-      freeWithModels: cards.filter((card) => card.querySelector('.badge').textContent === 'No payment').every((card) => card.querySelectorAll('select[name=model] option').length > 0),
-      freeModels: cards.filter((card) => card.dataset.harness === 'gemini-cli').map((card) => Array.from(card.querySelectorAll('select[name=model] option')).map((o) => o.value)),
+      free: cards.filter(isFree).map((card) => card.dataset.harness),
+      paid: cards.filter((card) => !isFree(card)).map((card) => card.dataset.harness),
+      paidWithPassword: cards.filter((card) => !isFree(card)).some((card) => card.querySelector('input[type=password]')),
+      models: Object.fromEntries(cards.map((card) => [card.dataset.harness, models(card)])),
     };
   })()`);
 
   record(results, logFile, { name: 'every harness is listed', ok: harnessView.count === 5, detail: harnessView.names.join(', ') });
-  record(results, logFile, { name: 'paid harnesses are flagged', ok: harnessView.paid.length === 4, detail: harnessView.paid.join(', ') });
-  record(results, logFile, { name: 'the free harness keeps its built-in models', ok: harnessView.freeWithModels && harnessView.freeModels.flat().length === 3, detail: harnessView.freeModels.flat().join(', ') });
+  record(results, logFile, {
+    name: 'only Claude Code is flagged as needing a paid plan',
+    ok: JSON.stringify(harnessView.paid) === JSON.stringify(['claude-code']),
+    detail: harnessView.paid.join(', '),
+  });
+  record(results, logFile, {
+    name: 'Claude, Codex and Gemini all run on the free plan',
+    ok: JSON.stringify(harnessView.free) === JSON.stringify(['claude-app', 'codex-app', 'codex-cli', 'gemini-cli']),
+    detail: harnessView.free.join(', '),
+  });
+  const otherModels = Object.entries(harnessView.models).filter(([id]) => id !== 'gemini-cli');
+  record(results, logFile, {
+    name: 'only Gemini offers built-in models, and Claude Code has none',
+    ok: harnessView.models['gemini-cli'].length === 3 && otherModels.every(([, models]) => models.length === 0),
+    detail: `gemini: ${harnessView.models['gemini-cli'].join(', ')} | claude-code: ${harnessView.models['claude-code'].join(', ') || 'none'}`,
+  });
   record(results, logFile, { name: 'paid harnesses never ask for a login', ok: harnessView.paidWithPassword === false });
 
   await win.webContents.executeJavaScript(`(() => {
@@ -219,6 +234,38 @@ async function runSelfTest({ app, window: win, lockApp, showAccountPage, logFile
     await lockApp();
     const lockedFromAccount = await waitFor(win, `!document.querySelector('#view-auth').hidden`, 20000);
     record(results, logFile, { name: 'locking from account management returns to sign in', ok: lockedFromAccount, detail: lockedFromAccount ? '' : 'sign-in page never appeared' });
+
+    const signIn = async () => {
+      await win.webContents.executeJavaScript(`(() => {
+        const form = document.querySelector('#form-login');
+        form.email.value = ${JSON.stringify(ACCOUNT.email)};
+        form.password.value = ${JSON.stringify(ACCOUNT.password)};
+        form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        return true;
+      })()`, true);
+      return waitFor(win, `location.href.includes('pages/home/index.html')`, 30000);
+    };
+
+    record(results, logFile, { name: 'signing in again reopens the router', ok: await signIn(), detail: '' });
+
+    await showAccountPage('#account');
+    await waitFor(win, `!document.querySelector('#view-account').hidden`, 20000);
+    await win.webContents.executeJavaScript(`(() => {
+      document.querySelector('#btn-logout').click();
+      return true;
+    })()`, true);
+    const signedOutFromPage = await waitFor(win, `!document.querySelector('#view-auth').hidden`, 20000);
+    record(results, logFile, { name: 'signing out from account management returns to sign in', ok: signedOutFromPage, detail: signedOutFromPage ? '' : 'sign-in page never appeared' });
+
+    const afterLogout = await win.webContents.executeJavaScript(
+      `(async () => (await window.gate.reveal()).reason)()`,
+      true
+    );
+    record(results, logFile, {
+      name: 'the router stays locked after signing out from the page',
+      ok: afterLogout === 'signed_out',
+      detail: afterLogout,
+    });
   } catch (err) {
     record(results, logFile, { name: 'the self-test ran to completion', ok: false, detail: err && err.message ? err.message : String(err) });
   } finally {

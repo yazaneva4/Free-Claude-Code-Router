@@ -50,6 +50,38 @@ const BY_ID = new Map(ALL_PROVIDERS.map((p) => [p.id, p]));
 
 const FORBIDDEN_PROVIDER_IDS = new Set(['huggingface', 'hf', 'hugging-face']);
 
+const SUPPORTED_APIS = ['openai_chat_completions', 'openai_responses', 'anthropic_messages'];
+const SUPPORTED_API_SET = new Set(SUPPORTED_APIS);
+
+function isSupportedApi(api) {
+  return SUPPORTED_API_SET.has(String(api || '').trim());
+}
+
+function parseUrl(value) {
+  try {
+    return new URL(String(value));
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '::1' || /^127\./.test(host);
+}
+
+function usableBaseUrl(provider, baseUrl) {
+  const wanted = parseUrl(baseUrl || provider.baseUrl);
+  if (!wanted || (wanted.protocol !== 'http:' && wanted.protocol !== 'https:')) {
+    throw new Error('Provider endpoints must be http or https URLs.');
+  }
+  const home = parseUrl(provider.baseUrl);
+  if (!(home && home.origin === wanted.origin) && !isLoopbackHost(wanted.hostname)) {
+    throw new Error('A stored credential is only sent to the provider endpoint or to a local address.');
+  }
+  return wanted.toString().replace(/\/+$/, '');
+}
+
 function getProvider(providerId) {
   const id = String(providerId || '').trim().toLowerCase();
   if (FORBIDDEN_PROVIDER_IDS.has(id)) return null;
@@ -70,6 +102,7 @@ function publicProvider(provider) {
     kind: provider.kind || 'cloud',
     baseUrl: provider.baseUrl,
     api: provider.api,
+    supportedApis: SUPPORTED_APIS.slice(),
     requiresCredential: Boolean(provider.requiresCredential),
     credentialLabel: provider.credentialLabel || 'API key',
     docs: provider.docs || null,
@@ -78,6 +111,7 @@ function publicProvider(provider) {
 
 function catalog() {
   return {
+    apis: SUPPORTED_APIS.slice(),
     local: LOCAL_PROVIDERS.map(publicProvider),
     cloud: CLOUD_PROVIDERS.map(publicProvider),
   };
@@ -124,7 +158,7 @@ function normalizeModels(body) {
 async function listModels(providerId, { secret = null, baseUrl = null, timeoutMs = 6000 } = {}) {
   const provider = getProvider(providerId);
   if (!provider) throw new Error('Unknown provider.');
-  const base = String(baseUrl || provider.baseUrl).replace(/\/+$/, '');
+  const base = usableBaseUrl(provider, baseUrl);
   const headers = { accept: 'application/json' };
   if (secret) headers.authorization = `Bearer ${secret}`;
 
@@ -166,8 +200,12 @@ module.exports = {
   CLOUD_PROVIDERS,
   ALL_PROVIDERS,
   FORBIDDEN_PROVIDER_IDS,
+  SUPPORTED_APIS,
+  isSupportedApi,
   getProvider,
   isForbiddenModelId,
+  isLoopbackHost,
+  usableBaseUrl,
   publicProvider,
   catalog,
   listModels,

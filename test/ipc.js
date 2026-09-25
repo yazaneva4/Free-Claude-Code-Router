@@ -160,6 +160,30 @@ test('routing and integration updates persist over IPC', async () => {
   assert.strictEqual(integration.integrations.cli.claudeCode.enabled, true);
 });
 
+test('an unsupported API is refused at the IPC boundary', async () => {
+  const h = build();
+  await h.call('auth:signup', GOOD);
+  const catalog = await h.call('providers:catalog');
+  assert.ok(catalog.apis.includes('openai_responses'), 'the catalog lists what the router speaks');
+
+  for (const api of ['made_up', 'huggingface', 'openai_completions', '']) {
+    const err = await h.callFail('settings:updateProvider', { providerId: 'ollama', patch: { api } });
+    assert.strictEqual(err.code, 'unsupported_api', `${api || '(empty)'} must be refused`);
+  }
+  const harnessErr = await h.callFail('settings:updateIntegration', { kind: 'cli', name: 'claudeCode', patch: { api: 'telepathy' } });
+  assert.strictEqual(harnessErr.code, 'unsupported_api');
+
+  const accepted = await h.call('settings:updateProvider', { providerId: 'ollama', patch: { api: 'openai_responses' } });
+  assert.strictEqual(accepted.providers.ollama.api, 'openai_responses');
+  const harnessOk = await h.call('settings:updateIntegration', { kind: 'cli', name: 'claudeCode', patch: { api: 'anthropic_messages' } });
+  assert.strictEqual(harnessOk.integrations.cli.claudeCode.api, 'anthropic_messages');
+
+  const secret = await h.call('settings:updateProvider', { providerId: 'openai', patch: { secret: 'sk-smuggled' } });
+  assert.strictEqual(secret.providers.openai.secret, undefined, 'an unknown key is dropped instead of stored');
+  const openai = (await h.call('settings:get')).providers.openai;
+  assert.strictEqual(openai.secret, undefined, 'no unknown key is ever written');
+});
+
 test('logout closes privileged channels again', async () => {
   const h = build();
   await h.call('auth:signup', GOOD);

@@ -1,9 +1,95 @@
 'use strict';
 
-const { ALL_PROVIDERS, getProvider, FORBIDDEN_PROVIDER_IDS } = require('./providers');
+const {
+  ALL_PROVIDERS,
+  getProvider,
+  isForbiddenModelId,
+  isSupportedApi,
+  SUPPORTED_APIS,
+  FORBIDDEN_PROVIDER_IDS,
+} = require('./providers');
 
 const SETTINGS_FILE = 'settings.json';
 const SCHEMA_VERSION = 1;
+
+const PROVIDER_KEYS = new Set(['enabled', 'baseUrl', 'autoFetchModels', 'api']);
+const INTEGRATION_KEYS = new Set(['enabled', 'model', 'baseUrl', 'configPath', 'api']);
+
+function badRequest(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
+function cleanBaseUrl(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = String(value).trim();
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw badRequest('invalid_base_url', 'An endpoint must be a full http or https URL.');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw badRequest('invalid_base_url', 'An endpoint must use http or https.');
+  }
+  return text.replace(/\/+$/, '');
+}
+
+function cleanModel(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = String(value).trim();
+  if (text.length > 200) throw badRequest('invalid_model', 'That model name is too long.');
+  if (isForbiddenModelId(text)) throw badRequest('forbidden_model', 'That model is not supported.');
+  return text;
+}
+
+function cleanText(value, label) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = String(value).trim();
+  if (text.length > 512 || /[\r\n\0]/.test(text)) throw badRequest('invalid_value', `${label} looks invalid.`);
+  return text;
+}
+
+function cleanProviderPatch(patch) {
+  const out = {};
+  for (const [key, value] of Object.entries(patch && typeof patch === 'object' ? patch : {})) {
+    if (!PROVIDER_KEYS.has(key)) continue;
+    if (key === 'enabled' || key === 'autoFetchModels') {
+      if (typeof value !== 'boolean') throw badRequest('invalid_value', `${key} must be true or false.`);
+      out[key] = value;
+    } else if (key === 'baseUrl') {
+      out.baseUrl = cleanBaseUrl(value);
+    } else {
+      if (!isSupportedApi(value)) {
+        throw badRequest('unsupported_api', `Unsupported API. Choose one of: ${SUPPORTED_APIS.join(', ')}.`);
+      }
+      out.api = String(value).trim();
+    }
+  }
+  return out;
+}
+
+function cleanIntegrationPatch(patch) {
+  const out = {};
+  for (const [key, value] of Object.entries(patch && typeof patch === 'object' ? patch : {})) {
+    if (!INTEGRATION_KEYS.has(key)) continue;
+    if (key === 'enabled') {
+      if (typeof value !== 'boolean') throw badRequest('invalid_value', 'enabled must be true or false.');
+      out.enabled = value;
+    } else if (key === 'baseUrl') {
+      out.baseUrl = cleanBaseUrl(value);
+    } else if (key === 'model') {
+      out.model = cleanModel(value);
+    } else if (key === 'api') {
+      if (!isSupportedApi(value)) {
+        throw badRequest('unsupported_api', `Unsupported API. Choose one of: ${SUPPORTED_APIS.join(', ')}.`);
+      }
+      out.api = String(value).trim();
+    } else {
+      out.configPath = cleanText(value, 'A config path');
+    }
+  }
+  return out;
+}
 
 function defaults() {
   const providers = {};
@@ -83,9 +169,12 @@ class Settings {
       next.fallbackOrder = next.fallbackOrder.filter((id) => Boolean(getProvider(id)));
     }
     if (next.modelByProvider && typeof next.modelByProvider === 'object') {
-      for (const key of Object.keys(next.modelByProvider)) {
-        if (!getProvider(key)) delete next.modelByProvider[key];
+      const models = {};
+      for (const [key, value] of Object.entries(next.modelByProvider)) {
+        if (!getProvider(key)) continue;
+        models[key] = cleanModel(value);
       }
+      next.modelByProvider = models;
     }
     return this.save({ ...current, routing: next });
   }
@@ -95,9 +184,10 @@ class Settings {
     if (!provider) throw new Error('Unknown provider.');
     const current = this.get();
     const existing = current.providers[provider.id] || {};
+    const clean = cleanProviderPatch(patch);
     return this.save({
       ...current,
-      providers: { ...current.providers, [provider.id]: { ...existing, ...(patch || {}) } },
+      providers: { ...current.providers, [provider.id]: { ...existing, ...clean } },
     });
   }
 
@@ -111,10 +201,18 @@ class Settings {
       ...current,
       integrations: {
         ...current.integrations,
-        [kind]: { ...current.integrations[kind], [name]: { ...group[name], ...(patch || {}) } },
+        [kind]: { ...current.integrations[kind], [name]: { ...group[name], ...cleanIntegrationPatch(patch) } },
       },
     });
   }
 }
 
-module.exports = { Settings, defaults, deepMerge, SETTINGS_FILE };
+module.exports = {
+  Settings,
+  defaults,
+  deepMerge,
+  cleanProviderPatch,
+  cleanIntegrationPatch,
+  cleanBaseUrl,
+  SETTINGS_FILE,
+};

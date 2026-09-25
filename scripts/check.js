@@ -4,7 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const roots = [path.join(__dirname, '..', 'src'), path.join(__dirname, '..', 'test')];
+const roots = [
+  path.join(__dirname, '..', 'src'),
+  path.join(__dirname, '..', 'test'),
+  path.join(__dirname),
+];
 let checked = 0;
 const failures = [];
 

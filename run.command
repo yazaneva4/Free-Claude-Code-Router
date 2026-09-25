@@ -40,7 +40,7 @@ selftest() {
   mkdir -p "$auth_dir"
   rm -f "$SELFTEST_LOG"
   local rc=0
-  CCR_SELFTEST=1 CCR_AUTH_DIR="$auth_dir" "$BIN" >/tmp/ccr-selftest.log 2>&1 || rc=$?
+  CCR_SELFTEST=1 CCR_AUTH_DIR="$auth_dir" CCR_INTERNAL_USER_DATA_DIR="$auth_dir/app-data" "$BIN" >/tmp/ccr-selftest.log 2>&1 || rc=$?
   print "\n--- self-test ---"
   if [ -f "$SELFTEST_LOG" ]; then
     cat "$SELFTEST_LOG"
@@ -54,6 +54,7 @@ selftest() {
 
 case "$1" in
   --install)
+    stop_app
     install_build
     open -a "Claude Code Router"
     ;;
@@ -69,6 +70,9 @@ case "$1" in
     ;;
   --log)
     tail -n 20 "$HOME/.claude-code-router/gate.log"
+    ;;
+  --help|-h)
+    print "usage: run.command [--install | --tests | --selftest | --log]"
     ;;
   *)
     open -a "Claude Code Router"
