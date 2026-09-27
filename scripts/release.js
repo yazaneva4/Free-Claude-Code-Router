@@ -48,6 +48,9 @@ function compare(a, b) {
 /**
  * A release is only installable if it carries the packed build and the hash of
  * that build, so both are always produced here rather than left to the caller.
+ *
+ * The build is packed here rather than taken from dist/ so a release can never
+ * go out carrying a build that does not match this source tree.
  */
 function stageBuild(version) {
   fs.mkdirSync(STAGE, { recursive: true });
@@ -154,7 +157,10 @@ async function main() {
   }
   if (!allOk) fail('The release exists but is missing assets, so the app will report it as not installable. Re-upload them before closing it.');
 
-  process.stdout.write(`\nDone. The app will offer ${version} on its next update check, and installing it swaps in the packed build.\n`);
+  process.stdout.write(`\nDone. The app offers ${version} on its next update check.\n`);
+  process.stdout.write(`Installing it downloads ${BUILD_ASSET}, checks the hash published beside it,\n`);
+  process.stdout.write(`and swaps the build in. A release missing either file is reported as not\n`);
+  process.stdout.write(`installable rather than half applied.\n`);
 }
 
 main().catch((err) => fail(err && err.stack ? err.stack : String(err)));

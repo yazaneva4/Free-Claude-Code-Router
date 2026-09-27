@@ -5,7 +5,13 @@ const path = require('node:path');
 
 if ('noAsar' in process) process.noAsar = true;
 
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.DS_Store']);
+/*
+ * dist is skipped because it holds the build output, including a zip of the
+ * whole app. Walking the tree without this packs the previous build into the
+ * next one, which turns a 600 KB build into a 118 MB one that carries a copy of
+ * itself.
+ */
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.DS_Store', 'dist', '.github']);
 const SKIP_FILES = new Set(['.DS_Store']);
 
 function walk(dir, files, prefix, blobs) {

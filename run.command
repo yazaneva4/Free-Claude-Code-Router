@@ -1,15 +1,30 @@
 #!/bin/zsh
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-APP="/Applications/Claude Code Router.app"
+APP="${CCR_APP_PATH:-/Applications/Claude Code Router.app}"
 BIN="$APP/Contents/MacOS/Claude Code Router"
 RES="$APP/Contents/Resources"
 SELFTEST_LOG="$HOME/.claude-code-router/selftest.log"
 
-if [ ! -x "$BIN" ]; then
-  print -u2 "Claude Code Router not found at: $APP"
-  exit 1
-fi
+require_app() {
+  if [ ! -x "$BIN" ]; then
+    print -u2 "The router application is not installed at:
+  $APP
+
+This project layers on top of the router rather than replacing it, so install it
+first, then run this again:
+
+  open https://github.com/musistudio/claude-code-router/releases
+
+If it is installed somewhere else, set CCR_APP_PATH to the .app bundle."
+    exit 1
+  fi
+  if [ ! -f "$RES/app-original.asar" ]; then
+    print -u2 "That bundle has no Contents/Resources/app-original.asar, so it is not the router.
+Check CCR_APP_PATH: $APP"
+    exit 1
+  fi
+}
 
 run_node() {
   ELECTRON_RUN_AS_NODE=1 "$BIN" "$@"
@@ -62,13 +77,53 @@ selftest() {
   return $rc
 }
 
+usage() {
+  cat <<'USAGE'
+usage: ./run.command [option]
+
+  (no option)     open the app
+  --install       pack this repository and put it in the installed app, then open
+  --tests         syntax, unit, ipc and in-app tests, then open the app
+  --selftest      only the in-app tests, against a throwaway account
+  --dist [ver]    build an installable app and zip into dist/, with hashes
+  --release <ver> "notes"
+                  dist, then publish a release the in-app updater can install
+  --log           show the last lines of the app's log
+  --status        show what is installed, and which build is in place
+  --help          this text
+
+The router app must already be installed, because this repository layers on top
+of it. Set CCR_APP_PATH if it is not in /Applications.
+USAGE
+}
+
+status() {
+  require_app
+  print "app        : $APP"
+  print "version    : $(run_node -e "console.log(require('$RES/app.asar/package.json').version)")"
+  print "upstream   : $RES/app-original.asar"
+  print "built      : $RES/app.asar"
+  print "signing    : $(codesign -dv "$APP" 2>&1 | sed -n 's/^Signature=//p')"
+  print "repo       : $(git -C "$HERE" remote get-url origin 2>/dev/null || print 'none')"
+  print "branch     : $(git -C "$HERE" branch --show-current 2>/dev/null || print 'none')"
+  local dirty
+  dirty=$(git -C "$HERE" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$dirty" = "0" ]; then
+    print "uncommitted: none"
+  else
+    print "uncommitted: $dirty file(s)"
+  fi
+}
+
 case "$1" in
   --install)
+    require_app
     stop_app
     install_build
     open -a "Claude Code Router"
     ;;
   --tests)
+    require_app
     run_node "$HERE/scripts/check.js"
     run_node "$HERE/test/run.js"
     run_node "$HERE/test/ipc.js"
@@ -76,15 +131,42 @@ case "$1" in
     open -a "Claude Code Router"
     ;;
   --selftest)
+    require_app
     selftest
+    ;;
+  --dist)
+    require_app
+    run_node "$HERE/scripts/build-app.js" "$2"
+    ;;
+  --release)
+    require_app
+    version="$2"
+    notes="$3"
+    if [ -z "$version" ] || [ -z "$notes" ]; then
+      print -u2 'usage: ./run.command --release <x.y.z> "release notes"'
+      exit 1
+    fi
+    if [ -z "$GITHUB_TOKEN" ]; then
+      print -u2 'GITHUB_TOKEN is required to publish a release, because releases go through the
+GitHub API rather than over SSH. Create one at https://github.com/settings/tokens
+with repo scope, then run this again.'
+      exit 1
+    fi
+    run_node "$HERE/scripts/build-app.js" "$version"
+    print ""
+    run_node "$HERE/scripts/release.js" "$version" "$notes" "$HERE/dist/Claude-Code-Router-$version.zip"
     ;;
   --log)
     tail -n 20 "$HOME/.claude-code-router/gate.log"
     ;;
+  --status)
+    status
+    ;;
   --help|-h)
-    print "usage: run.command [--install | --tests | --selftest | --log]"
+    usage
     ;;
   *)
+    require_app
     open -a "Claude Code Router"
     ;;
 esac

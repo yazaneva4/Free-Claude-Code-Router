@@ -1,0 +1,27 @@
+# Build output. The app and the zip are large and are produced on demand by
+# ./run.command --dist, so they are never committed.
+dist/
+*.zip
+*.asar
+*.sha256
+
+# Local state. The device key and the gateway profile token live here, and
+# committing either would hand a working credential to everyone who clones.
+.devicekey
+.claude-code-router/
+
+# Editors and operating system noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Anything that looks like a credential, in case one is ever written here by
+# hand. The test fixtures use obvious placeholders and are unaffected.
+*.pem
+*.key
+id_rsa
+id_ed25519
+.netrc
+.env
+.env.*

@@ -1,0 +1,44 @@
+name: tests
+
+# The gate is plain Node, so the whole suite runs without the router app. The
+# in-app tests need the app itself and are run on a machine that has it, with
+# ./run.command --tests.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: syntax
+        run: node scripts/check.js
+
+      - name: unit
+        run: node test/run.js
+
+      - name: ipc
+        run: node test/ipc.js
+
+      - name: secret scan
+        run: |
+          # A gateway token or an API key must never be committed. The test
+          # fixtures use obvious placeholders, so anything shaped like a real
+          # one here is a mistake worth failing the build over.
+          if git grep -nE 'ccr-profile-[A-Za-z0-9]{24,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY' -- . \
+            | grep -vE 'test/run\.js'; then
+            echo "::error::something that looks like a credential is committed"
+            exit 1
+          fi
+          echo "no credentials found"
+
+      - name: the build it would install is a readable archive
+        run: node scripts/verify-pack.js
