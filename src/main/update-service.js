@@ -16,9 +16,31 @@ const updater = require('./updater');
 const TARGET = process.env.CCR_APP_ASAR
   || '/Applications/Claude Code Router.app/Contents/Resources/app.asar';
 
+/**
+ * How often a running app looks for a new build.
+ *
+ * Long enough not to chatter at the release API, short enough that a session
+ * left open over a few days still hears about a release without needing a
+ * relaunch. A device that is closed simply checks the next time it starts.
+ */
+const CHECK_INTERVAL_MS = 30 * 60 * 1000;
+
 class UpdateService {
-  constructor({ currentVersion, home = null, target = TARGET, fetchImpl = fetch, relaunch = null, now = Date.now(), log = () => {} } = {}) {
+  constructor({
+    currentVersion,
+    home = null,
+    target = TARGET,
+    fetchImpl = fetch,
+    relaunch = null,
+    now = Date.now(),
+    log = () => {},
+    isSignedIn = () => true,
+    intervalMs = CHECK_INTERVAL_MS,
+  } = {}) {
     this.log = log;
+    this.isSignedIn = isSignedIn;
+    this.intervalMs = intervalMs;
+    this.timer = null;
     this.currentVersion = currentVersion;
     this.home = home;
     this.target = target;
@@ -43,8 +65,47 @@ class UpdateService {
     return { ...this.status, busy: this.busy, target: this.target };
   }
 
+  /**
+   * One scheduled look. It only ever reports: installing stays a decision the
+   * person makes, because it replaces the build of a running app.
+   */
+  async tick() {
+    if (this.busy) return this.snapshot();
+    const before = this.status.latestVersion;
+    const found = await this.check();
+    if (found.updateAvailable && found.latestVersion !== before) {
+      this.log(`update available: ${found.latestVersion} (not installed without asking)`);
+    }
+    return found;
+  }
+
+  /**
+   * Starts the periodic check. The timer is unref'd so it can never be the
+   * reason a process stays alive.
+   */
+  start() {
+    if (this.timer) return this;
+    this.timer = setInterval(() => {
+      this.tick().catch((err) => this.log(`scheduled update check failed: ${err && err.message ? err.message : err}`));
+    }, this.intervalMs);
+    if (typeof this.timer.unref === 'function') this.timer.unref();
+    return this;
+  }
+
+  stop() {
+    if (!this.timer) return this;
+    clearInterval(this.timer);
+    this.timer = null;
+    return this;
+  }
+
   async check({ force = false } = {}) {
     if (this.busy) return this.snapshot();
+    // Signed out there is no account to update, so nothing is asked of GitHub.
+    // This keeps the scheduled check from phoning home for a signed out device.
+    if (typeof this.isSignedIn === 'function' && !this.isSignedIn()) {
+      return { ...this.snapshot(), state: 'signed-out' };
+    }
     this.busy = true;
     try {
       const found = await updater.check({
@@ -172,4 +233,4 @@ function silenceBundledUpdater(electron = null) {
   return true;
 }
 
-module.exports = { UpdateService, silenceBundledUpdater, TARGET };
+module.exports = { UpdateService, silenceBundledUpdater, TARGET, CHECK_INTERVAL_MS };

@@ -1819,3 +1819,77 @@ test('a paid agent that is only routed locally is not shown built-in models', as
   assert.strictEqual(found.billed, true);
   assert.strictEqual(found.auth.subscription, false);
 });
+
+test('a scheduled check only ever reports, it never installs', async () => {
+  const { UpdateService } = require('../src/main/update-service');
+  const home = tempDir();
+  const target = path.join(home, 'app.build');
+  fs.writeFileSync(target, packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) }));
+  let relaunches = 0;
+  const build = packAsar({ 'package.json': JSON.stringify({ version: '1.1.0' }) });
+  let asked = 0;
+  const fetchImpl = async (url) => {
+    asked += 1;
+    if (url.includes('/releases/latest')) {
+      return { ok: true, status: 200, json: async () => ({ tag_name: 'v1.1.0', body: 'notes', assets: [
+        { name: 'app.asar', browser_download_url: 'https://cdn.test/app.asar' },
+        { name: 'app.asar.sha256', browser_download_url: 'https://cdn.test/app.asar.sha256' },
+      ] }) };
+    }
+    if (url.endsWith('.sha256')) {
+      const b = Buffer.from(`${updater.sha256(build)}  app.asar\n`, 'utf8');
+      return { ok: true, status: 200, headers: { get: () => String(b.length) }, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.length) };
+    }
+    return { ok: true, status: 200, headers: { get: () => String(build.length) }, arrayBuffer: async () => build.buffer.slice(build.byteOffset, build.byteOffset + build.length) };
+  };
+  const service = new UpdateService({ currentVersion: '1.0.0', home, target, fetchImpl, relaunch: () => { relaunches += 1; } });
+
+  const found = await service.tick();
+  assert.strictEqual(found.updateAvailable, true, 'the scheduled check does find a release');
+  assert.strictEqual(relaunches, 0, 'and does not install it');
+  assert.strictEqual(fs.readFileSync(target).length, packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) }).length, 'the installed build is untouched');
+  assert.ok(service.snapshot().updateAvailable, 'the card will show it when settings is opened');
+});
+
+test('a signed out device does not ask GitHub on a schedule', async () => {
+  const { UpdateService } = require('../src/main/update-service');
+  let asked = 0;
+  const service = new UpdateService({
+    currentVersion: '1.0.0',
+    home: tempDir(),
+    fetchImpl: async () => { asked += 1; return { ok: false, status: 404, json: async () => ({}) }; },
+    isSignedIn: () => false,
+  });
+  const found = await service.tick();
+  assert.strictEqual(asked, 0, 'nothing was requested');
+  assert.strictEqual(found.state, 'signed-out');
+  assert.strictEqual(service.snapshot().updateAvailable, false);
+});
+
+test('the scheduled check is unref\'d so it cannot hold the app open', () => {
+  const { UpdateService, CHECK_INTERVAL_MS } = require('../src/main/update-service');
+  assert.strictEqual(CHECK_INTERVAL_MS, 30 * 60 * 1000, 'half an hour');
+  const service = new UpdateService({ currentVersion: '1.0.0', home: tempDir(), intervalMs: 5 });
+  service.start();
+  assert.ok(service.timer, 'a timer is running');
+  assert.strictEqual(service.timer.hasRef(), false, 'it is unref\'d');
+  service.stop();
+  assert.strictEqual(service.timer, null, 'and it can be stopped again');
+  service.stop();
+});
+
+test('a check already in progress is not started a second time', async () => {
+  const { UpdateService } = require('../src/main/update-service');
+  let release;
+  const service = new UpdateService({
+    currentVersion: '1.0.0',
+    home: tempDir(),
+    fetchImpl: async () => new Promise((resolve) => { release = () => resolve({ ok: false, status: 404, json: async () => ({}) }); }),
+  });
+  const first = service.check();
+  const second = await service.check();
+  assert.strictEqual(second.busy, true, 'the second call reports the work already running');
+  release();
+  await first;
+  assert.strictEqual(service.snapshot().busy, false, 'and the service settles afterwards');
+});

@@ -451,7 +451,13 @@ async function bootstrap() {
     },
   });
   syncWorker = sync;
-  updateService = new UpdateService({ currentVersion: gateVersion(), log });
+  updateService = new UpdateService({
+    currentVersion: gateVersion(),
+    log,
+    // A signed out device has no account to update, so the scheduled check
+    // stays quiet for it rather than asking GitHub on a schedule.
+    isSignedIn: () => Boolean(accounts && accounts.session()),
+  });
   ipcApi = registerIpc({ ipcMain, onSessionEnded, sync, updateService, appVersion: gateVersion(), ...services });
 
   let win;
@@ -478,6 +484,12 @@ async function bootstrap() {
   }
 
   addGateMenu();
+
+  // Look for new builds while the app is open, not only at launch.
+  if (updateService) updateService.start();
+  app.on('will-quit', () => {
+    if (updateService) updateService.stop();
+  });
 
   if (SELFTEST) {
     const { runSelfTest } = require('./selftest');
