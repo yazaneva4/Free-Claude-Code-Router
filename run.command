@@ -25,11 +25,21 @@ install_build() {
 stop_app() {
   osascript -e 'tell application "Claude Code Router" to quit' >/dev/null 2>&1 || true
   for _ in {1..40}; do
-    pgrep -f "$BIN" >/dev/null 2>&1 || return 0
+    pgrep -f "$BIN" >/dev/null 2>&1 || break
     sleep 0.25
   done
+  # An instance can be running from a relative path or a copy of the bundle, and
+  # any survivor keeps the single instance lock, which would silently stop the
+  # next launch from opening a window.
   pkill -f "$BIN" >/dev/null 2>&1 || true
+  pkill -f "com.claudecoderouter.desktop" >/dev/null 2>&1 || true
   sleep 1
+  pkill -9 -f "Claude Code Router" >/dev/null 2>&1 || true
+  for _ in {1..20}; do
+    pgrep -f "Claude Code Router" >/dev/null 2>&1 || return 0
+    sleep 0.25
+  done
+  print -u2 "warning: an older Claude Code Router instance is still running and will block this one"
 }
 
 selftest() {

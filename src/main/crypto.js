@@ -138,10 +138,79 @@ function createCrypto(options = {}) {
   return { encrypt, decrypt, backend, blindIndex, randomToken };
 }
 
+/**
+ * Cross-device credentials.
+ *
+ * The local vault is sealed with a key that never leaves the device. When the
+ * account is set to sync, the same secrets are sealed a second time with a key
+ * derived from the account password, so another device signed in with that same
+ * password can open them and nothing else can. Only the ciphertext is ever sent.
+ */
+const PORTABLE_PREFIX = 'pv1:';
+
+function newVaultSalt() {
+  return crypto.randomBytes(SCRYPT.saltlen).toString('base64');
+}
+
+/**
+ * The salt is fixed per account rather than per device, so two devices signed in
+ * as the same person derive the same key from the same password and can open
+ * each other's sealed credentials. The salt is not a secret; the password is.
+ */
+function deriveVaultSalt(email) {
+  return crypto
+    .createHash('sha256')
+    .update(`ccr-vault-salt:v1:${String(email || '').trim().toLowerCase()}`)
+    .digest('base64')
+    .slice(0, 24);
+}
+
+function deriveVaultKey(password, salt) {
+  const saltBytes = Buffer.from(String(salt || ''), 'base64');
+  if (saltBytes.length < 8) throw new Error('A vault salt is missing or malformed.');
+  return crypto.scryptSync(String(password).normalize('NFKC'), saltBytes, 32, {
+    N: SCRYPT.N,
+    r: SCRYPT.r,
+    p: SCRYPT.p,
+    maxmem: 256 * 1024 * 1024,
+  });
+}
+
+function encryptPortable(key, plaintext) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const body = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${PORTABLE_PREFIX}${[iv, tag, body].map((part) => part.toString('base64url')).join('.')}`;
+}
+
+function decryptPortable(key, payload) {
+  const text = String(payload || '');
+  if (!text.startsWith(PORTABLE_PREFIX)) throw new Error('That is not a synced credential.');
+  const parts = text.slice(PORTABLE_PREFIX.length).split('.');
+  if (parts.length !== 3) throw new Error('That synced credential is damaged.');
+  const [iv, tag, body] = parts.map((part) => Buffer.from(part, 'base64url'));
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+}
+
+/** A stable, non-reversible handle so the endpoint never sees an address. */
+function accountHandle(email) {
+  return crypto.createHash('sha256').update(String(email || '').trim().toLowerCase()).digest('base64url').slice(0, 32);
+}
+
 module.exports = {
   createCrypto,
   hashPassword,
   verifyPassword,
+  newVaultSalt,
+  deriveVaultSalt,
+  deriveVaultKey,
+  encryptPortable,
+  decryptPortable,
+  accountHandle,
+  PORTABLE_PREFIX,
   passwordProblem,
   emailProblem,
   normalizeEmail,

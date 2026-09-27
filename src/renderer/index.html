@@ -6,125 +6,210 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
     />
-    <title>Claude Code Router — Account</title>
+    <title>Claude Code Router</title>
     <link rel="stylesheet" href="css/main.css" />
   </head>
   <body class="account-body">
     <div id="toast" class="toast" hidden></div>
 
     <div class="progress" id="progress" hidden>
-      <span class="step" data-progress="1">1. Account</span>
-      <span class="step" data-progress="2">2. Sync</span>
-      <span class="step" data-progress="3">3. Harnesses</span>
+      <span class="step" data-progress="1" data-i18n="progress.account">1. Account</span>
+      <span class="step" data-progress="2" data-i18n="progress.sync">2. Sync</span>
+      <span class="step" data-progress="3" data-i18n="progress.harnesses">3. Harnesses</span>
     </div>
 
     <section id="view-auth" class="pane" hidden>
       <div class="brandmark">Claude Code Router</div>
-      <p class="muted center" id="gate-subtitle">Sign in to open your router. Guest access is not available.</p>
+      <p class="muted center" id="gate-subtitle" data-i18n="auth.subtitle.login">Sign in to open your router. Guest access is not available.</p>
 
       <div class="tabs">
-        <button class="tab is-active" data-gate-tab="login" type="button">Sign in</button>
-        <button class="tab" data-gate-tab="signup" type="button">Create account</button>
+        <button class="tab is-active" data-gate-tab="login" type="button" data-i18n="auth.tab.login">Sign in</button>
+        <button class="tab" data-gate-tab="signup" type="button" data-i18n="auth.tab.signup">Create account</button>
       </div>
 
       <form id="form-login" class="form">
-        <label>Email<input name="email" type="email" autocomplete="username" required /></label>
-        <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
+        <label><span data-i18n="field.email">Email</span><input name="email" type="email" autocomplete="username" required /></label>
+        <label><span data-i18n="field.password">Password</span><input name="password" type="password" autocomplete="current-password" required /></label>
         <p class="error" data-error hidden></p>
-        <button class="primary" type="submit">Sign in</button>
+        <button class="primary" type="submit" data-i18n="action.signIn">Sign in</button>
       </form>
 
       <form id="form-signup" class="form" hidden>
-        <label>Display name<input name="displayName" type="text" autocomplete="name" required /></label>
-        <label>Email<input name="email" type="email" autocomplete="username" required /></label>
-        <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="10" /></label>
-        <p class="hint">Passwords are hashed with scrypt and secrets are encrypted. Nothing is stored in the clear.</p>
+        <label><span data-i18n="field.displayName">Display name</span><input name="displayName" type="text" autocomplete="name" required /></label>
+        <label><span data-i18n="field.email">Email</span><input name="email" type="email" autocomplete="username" required /></label>
+        <label><span data-i18n="field.password">Password</span><input name="password" type="password" autocomplete="new-password" required minlength="10" /></label>
+        <p class="hint" data-i18n="auth.passwordHint">Passwords are hashed with scrypt and secrets are encrypted. Nothing is stored in the clear.</p>
         <p class="error" data-error hidden></p>
-        <button class="primary" type="submit">Create account</button>
+        <button class="primary" type="submit" data-i18n="action.createAccount">Create account</button>
       </form>
     </section>
 
     <section id="view-sync" class="pane" hidden>
-      <div class="brandmark">Where should this account live?</div>
-      <p class="muted center">You are asked this once on every device you sign in from.</p>
+      <div class="brandmark" data-i18n="sync.title">Where should this account live?</div>
+      <p class="muted center" data-i18n="sync.subtitle">You are asked this once on every device you sign in from.</p>
 
       <form id="form-sync" class="form">
         <label class="choice">
           <input type="radio" name="storageMode" value="device" checked />
           <span>
-            <strong>This device only</strong>
-            <em>Secrets stay encrypted on this Mac. Nothing is uploaded.</em>
+            <strong data-i18n="sync.device">This device only</strong>
+            <em data-i18n="sync.deviceHint">Secrets stay encrypted on this Mac. Nothing is uploaded.</em>
           </span>
         </label>
         <label class="choice">
           <input type="radio" name="storageMode" value="synced" />
           <span>
-            <strong>Synced across devices</strong>
-            <em>Needs an https:// sync endpoint you control.</em>
+            <strong data-i18n="sync.synced">Synced across devices</strong>
+            <em data-i18n="sync.syncedHint">Needs an https:// sync endpoint you control.</em>
           </span>
         </label>
         <label id="sync-endpoint-field" hidden
-          >Sync endpoint<input name="syncEndpoint" type="url" placeholder="https://" />
+          ><span data-i18n="sync.endpoint">Sync endpoint</span><input name="syncEndpoint" type="url" placeholder="https://" />
         </label>
         <p class="error" data-error hidden></p>
-        <button class="primary" type="submit">Continue</button>
+        <button class="primary" type="submit" data-i18n="action.continue">Continue</button>
       </form>
     </section>
 
     <section id="view-harness" class="pane wide-pane" hidden>
-      <div class="brandmark">Pick your harnesses</div>
-      <p class="muted center">
-        Harnesses that need a paid plan are routed through your router instead, so no third-party login is
-        collected. The ones that run free keep their own built-in models.
-      </p>
+      <div class="brandmark" data-i18n="harness.title">Pick your harnesses</div>
+      <p class="muted center" data-i18n="harness.subtitle">Harnesses that need a paid plan are routed through your router instead, so no third-party login is collected. The ones that run free keep their own built-in models.</p>
 
       <form id="form-harness" class="stack">
         <div id="harness-list" class="stack"></div>
         <p class="error" data-error hidden></p>
-        <button class="primary" type="submit">Finish setup</button>
+        <button class="primary" type="submit" data-i18n="action.finishSetup">Finish setup</button>
       </form>
     </section>
 
-    <section id="view-account" class="pane" hidden>
-      <div class="brandmark">Account</div>
-      <p class="muted center" id="account-email"></p>
+    <section id="view-settings" class="pane wide-pane" hidden>
+      <header class="settings-bar">
+        <button id="btn-settings-back" class="glass-chip" type="button">
+          <span aria-hidden="true">&#8592;</span>
+          <span data-i18n="settings.back">Back</span>
+        </button>
+        <div class="settings-title" data-i18n="settings.title">Settings</div>
+        <div class="who" id="settings-email"></div>
+      </header>
 
-      <form id="form-profile" class="form card">
-        <h3>Profile</h3>
-        <label>Display name<input name="displayName" type="text" required /></label>
-        <label
-          >Credential storage
-          <select name="storageMode">
-            <option value="device">This device only</option>
-            <option value="synced">Synced across devices</option>
-          </select>
-        </label>
-        <label>Sync endpoint<input name="syncEndpoint" type="url" placeholder="https://" /></label>
-        <p class="hint" id="encryption-note"></p>
-        <p class="error" data-error hidden></p>
-        <button class="primary" type="submit">Save profile</button>
-      </form>
+      <nav class="tabs settings-tabs" id="settings-tabs">
+        <button class="tab is-active" data-tab="account" type="button" data-i18n="settings.tab.account">Account</button>
+        <button class="tab" data-tab="language" type="button" data-i18n="settings.tab.language">Language</button>
+        <button class="tab" data-tab="agents" type="button" data-i18n="settings.tab.agents">Agents</button>
+        <button class="tab" data-tab="gateway" type="button" data-i18n="settings.tab.gateway">Gateway</button>
+        <button class="tab" data-tab="providers" type="button" data-i18n="settings.tab.providers">Providers</button>
+        <button class="tab" data-tab="updates" type="button" data-i18n="settings.tab.updates">Updates</button>
+      </nav>
 
-      <form id="form-password" class="form card">
-        <h3>Password</h3>
-        <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required /></label>
-        <label>New password<input name="newPassword" type="password" autocomplete="new-password" required minlength="10" /></label>
-        <p class="error" data-error hidden></p>
-        <button class="primary" type="submit">Replace password</button>
-      </form>
+      <div data-panel="account" class="settings-panel">
+        <p class="muted center" id="settings-account-email"></p>
 
-      <div class="card">
-        <button id="btn-back-router" class="primary wide" type="button">Back to router</button>
-        <button id="btn-logout" class="ghost wide spaced" type="button">Sign out</button>
+        <form id="form-profile" class="form card">
+          <h3 data-i18n="account.profile">Profile</h3>
+          <label><span data-i18n="field.displayName">Display name</span><input name="displayName" type="text" required /></label>
+          <label
+            ><span data-i18n="account.storage">Credential storage</span>
+            <select name="storageMode">
+              <option value="device" data-i18n="account.storageDevice">This device only</option>
+              <option value="synced" data-i18n="account.storageSynced">Synced across devices</option>
+            </select>
+          </label>
+          <label><span data-i18n="account.endpoint">Sync endpoint</span><input name="syncEndpoint" type="url" placeholder="https://" /></label>
+          <p class="hint" id="encryption-note"></p>
+          <div class="row">
+            <button class="ghost" type="button" id="btn-share-keys" data-i18n="account.shareKeys">Share my API keys</button>
+            <button class="ghost" type="button" id="btn-take-keys" data-i18n="account.takeKeys">Use keys from my other devices</button>
+          </div>
+          <p class="hint" id="settings-secret-state"></p>
+          <p class="error" data-error hidden></p>
+          <button class="primary" type="submit" data-i18n="action.saveProfile">Save profile</button>
+        </form>
+
+        <form id="form-password" class="form card">
+          <h3 data-i18n="account.password">Password</h3>
+          <label><span data-i18n="field.currentPassword">Current password</span><input name="currentPassword" type="password" autocomplete="current-password" required /></label>
+          <label><span data-i18n="field.newPassword">New password</span><input name="newPassword" type="password" autocomplete="new-password" required minlength="10" /></label>
+          <p class="error" data-error hidden></p>
+          <button class="primary" type="submit" data-i18n="action.replacePassword">Replace password</button>
+        </form>
+
+        <div class="card">
+          <button id="btn-logout" class="ghost wide spaced" type="button" data-i18n="action.signOut">Sign out</button>
+        </div>
+
+        <div class="card danger-zone">
+          <h3 data-i18n="account.danger">Danger zone</h3>
+          <p class="hint" data-i18n="account.dangerHint">Deleting the account signs you out and erases its stored secrets on this device.</p>
+          <button id="btn-delete-account" class="danger-btn" type="button" data-i18n="action.deleteAccount">Delete account</button>
+        </div>
       </div>
 
-      <div class="card danger-zone">
-        <h3>Danger zone</h3>
-        <p class="hint">Deleting the account signs you out and erases its stored secrets on this device.</p>
-        <button id="btn-delete-account" class="danger-btn" type="button">Delete account</button>
+      <div data-panel="language" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="language.heading">Language</h3>
+          <p class="hint" data-i18n="language.hint">Applies to the sign-in and settings pages. The router keeps its own language setting.</p>
+          <label>
+            <span data-i18n="settings.tab.language">Language</span>
+            <select id="language-select"></select>
+          </label>
+          <p class="hint" data-i18n="language.restartHint">The change is applied right away.</p>
+        </div>
+      </div>
+
+      <div data-panel="agents" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="agents.heading">Agents</h3>
+          <p class="hint" data-i18n="agents.hint">An agent is only used once you add it.</p>
+          <div id="agent-list" class="stack"></div>
+          <p class="hint" id="agent-empty" data-i18n="agents.empty" hidden></p>
+        </div>
+      </div>
+
+      <div data-panel="gateway" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="gateway.heading">Gateway</h3>
+          <form id="form-gateway" class="form">
+            <label><span data-i18n="gateway.endpoint">Endpoint</span><input name="endpoint" type="url" placeholder="http://127.0.0.1:3456" /></label>
+            <label class="toggle">
+              <input type="checkbox" name="autoRepair" />
+              <span data-i18n="gateway.autoRepair">Repair a broken model automatically</span>
+            </label>
+            <p class="error" data-error hidden></p>
+            <button class="primary" type="submit" data-i18n="action.save">Save</button>
+          </form>
+          <div class="row">
+            <button class="ghost" type="button" id="btn-gateway-refresh" data-i18n="action.refresh">Refresh</button>
+            <button class="ghost" type="button" id="btn-gateway-repair" data-i18n="action.repair">Repair</button>
+          </div>
+          <p class="hint" id="gateway-summary"></p>
+        </div>
+      </div>
+
+      <div data-panel="providers" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="providers.heading">Providers</h3>
+          <p class="hint" data-i18n="providers.hint">A provider is refused unless the router can actually use it.</p>
+          <div id="provider-list" class="stack"></div>
+        </div>
+      </div>
+
+      <div data-panel="updates" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="updates.heading">Updates</h3>
+          <p class="hint" id="updates-summary"></p>
+          <div class="row">
+            <button class="ghost" type="button" id="btn-updates-check" data-i18n="action.checkUpdates">Check for updates</button>
+            <button class="primary" type="button" id="btn-updates-install" hidden></button>
+          </div>
+          <pre class="notes" id="updates-notes" hidden></pre>
+          <p class="error" id="updates-error" hidden></p>
+        </div>
       </div>
     </section>
 
+    <script src="js/i18n.js"></script>
+    <script src="js/i18n-tables.js"></script>
+    <script src="js/settings.js"></script>
     <script src="js/account.js"></script>
   </body>
 </html>

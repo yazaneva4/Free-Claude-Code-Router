@@ -213,27 +213,145 @@ async function runSelfTest({ app, window: win, lockApp, showAccountPage, logFile
     const backAgain = await waitFor(win, `location.href.includes('pages/home/index.html')`, 30000);
     record(results, logFile, { name: 'signing back in skips setup and reopens the router', ok: backAgain, detail: backAgain ? '' : 'router did not come back' });
 
-    await showAccountPage('#account');
-    const accountView = await waitFor(win, `!document.querySelector('#view-account').hidden`, 20000);
+    await showAccountPage('#settings');
+    const settingsView = await waitFor(win, `!document.querySelector('#view-settings').hidden`, 20000);
     const identity = await win.webContents.executeJavaScript(
-      `(() => document.querySelector('#account-email').textContent)()`,
+      `(() => document.querySelector('#settings-account-email').textContent)()`,
       true
     );
-    record(results, logFile, { name: 'the account menu opens account management in the same window', ok: accountView, detail: accountView ? '' : 'account view never appeared' });
-    record(results, logFile, { name: 'account management shows the signed-in identity', ok: identity === ACCOUNT.email, detail: identity });
+    record(results, logFile, { name: 'the account menu opens settings in the same window', ok: settingsView, detail: settingsView ? '' : 'the settings view never appeared' });
+    record(results, logFile, { name: 'settings shows the signed-in identity', ok: identity === ACCOUNT.email, detail: identity });
+
+    // Everything the app can manage has to be reachable from settings, and the
+    // back button has to be there to leave again.
+    const layout = await win.webContents.executeJavaScript(`(() => {
+      const tabs = Array.from(document.querySelectorAll('#settings-tabs .tab')).map((tab) => tab.dataset.tab);
+      return {
+        tabs,
+        back: !!document.querySelector('#btn-settings-back'),
+        account: !!document.querySelector('#form-profile'),
+        language: !!document.querySelector('#language-select'),
+      };
+    })()`, true);
+    for (const wanted of ['account', 'language', 'agents', 'gateway', 'providers', 'updates']) {
+      record(results, logFile, {
+        name: `settings has a ${wanted} tab`,
+        ok: Boolean(layout && layout.tabs.includes(wanted)),
+        detail: layout ? layout.tabs.join(', ') : 'no tabs',
+      });
+    }
+    record(results, logFile, { name: 'settings has a back button', ok: Boolean(layout && layout.back), detail: '' });
+    record(results, logFile, { name: 'the account form lives in settings', ok: Boolean(layout && layout.account), detail: '' });
+    record(results, logFile, { name: 'settings offers a language picker', ok: Boolean(layout && layout.language), detail: '' });
+
+    // The language picker has to offer every language and switch the page.
+    const languages = await win.webContents.executeJavaScript(`(async () => {
+      const select = document.querySelector('#language-select');
+      const options = Array.from(select.options).map((option) => option.value);
+      select.value = 'ar';
+      select.dispatchEvent(new Event('change'));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const dir = document.documentElement.dir;
+      const lang = document.documentElement.lang;
+      const back = document.querySelector('#btn-settings-back').textContent.replace(/\s+/g, ' ').trim();
+      const tab = document.querySelector('#settings-tabs .tab[data-tab="language"]').textContent.trim();
+      select.value = 'en';
+      select.dispatchEvent(new Event('change'));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return { count: options.length, options, dir, lang, back, tab, backEn: document.querySelector('#btn-settings-back').textContent.replace(/\s+/g, ' ').trim() };
+    })()`, true);
+    record(results, logFile, {
+      name: 'the language picker offers every language',
+      ok: Boolean(languages && languages.count >= 20),
+      detail: languages ? `${languages.count} offered` : 'no options',
+    });
+    if (languages) console.log(`      languages: ${languages.options.join(' ')}`);
+    record(results, logFile, { name: 'choosing a language repaints the page in it', ok: Boolean(languages && languages.back && languages.back !== languages.backEn), detail: languages ? `${languages.backEn} -> ${languages.back}` : '' });
+    record(results, logFile, { name: 'a right to left language flips the layout', ok: Boolean(languages && languages.dir === 'rtl' && languages.lang === 'ar'), detail: languages ? `dir=${languages.dir} lang=${languages.lang}` : '' });
+
+    // The update card has to say something true without ever offering a button
+    // that cannot finish.
+    const updates = await win.webContents.executeJavaScript(`(async () => {
+      document.querySelector('#settings-tabs .tab[data-tab="updates"]').click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const summary = document.querySelector('#updates-summary');
+      const install = document.querySelector('#btn-updates-install');
+      const check = document.querySelector('#btn-updates-check');
+      if (!summary || !install || !check) return { ok: false, reason: 'the update card is missing' };
+      const state = await window.gate.updates.check(true).catch(() => null);
+      return {
+        ok: typeof summary.textContent === 'string' && summary.textContent.trim().length > 0,
+        reason: 'the card never said anything',
+        said: summary.textContent,
+        installHidden: install.hidden,
+        offline: !state || state.state === 'no-release' || state.state === 'check-failed',
+      };
+    })()`, true);
+    record(results, logFile, { name: 'the update card reports the real version and offers nothing broken', ok: updates && updates.ok, detail: updates && !updates.ok ? updates.reason : '' });
+    if (updates && updates.ok) {
+      console.log(`      said: ${updates.said}`);
+      record(results, logFile, {
+        name: 'the install button only appears when a build can actually be installed',
+        ok: updates.installHidden || !updates.offline,
+        detail: updates.installHidden ? '' : 'it offered an install with nothing to install',
+      });
+    }
+
+    // Agents are listed from settings, and one can be added and removed again.
+    const agents = await win.webContents.executeJavaScript(`(async () => {
+      document.querySelector('#settings-tabs .tab[data-tab="agents"]').click();
+      const pick = () => Array.from(document.querySelectorAll('#agent-list [data-agent]'));
+      // Listing the agents also asks each one what models it offers, which
+      // shells out, so the list is polled rather than read after a fixed pause.
+      const began = Date.now();
+      while (Date.now() - began < 25000 && !pick().length) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      const cards = pick();
+      if (!cards.length) return { ok: false, reason: 'no agents were listed' };
+      const card = cards.find((node) => node.querySelector('[data-role=add]')) || cards[0];
+      const id = card.dataset.agent;
+      card.querySelector('[data-role=add], [data-role=remove]').click();
+      const started = Date.now();
+      let added = false;
+      while (Date.now() - started < 8000) {
+        const next = pick().find((node) => node.dataset.agent === id);
+        const button = next && next.querySelector('[data-role=add], [data-role=remove]');
+        if (button && button.dataset.role === 'remove') { added = true; break; }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (!added) return { ok: false, reason: 'the agent could not be added' };
+      pick().find((node) => node.dataset.agent === id).querySelector('[data-role=remove]').click();
+      const off = await new Promise((resolve) => {
+        const begin = Date.now();
+        const tick = () => {
+          const node = pick().find((n) => n.dataset.agent === id);
+          const button = node && node.querySelector('[data-role=add], [data-role=remove]');
+          if (button && button.dataset.role === 'add') return resolve(true);
+          if (Date.now() - begin > 8000) return resolve(false);
+          setTimeout(tick, 200);
+        };
+        tick();
+      });
+      return { ok: off, reason: 'the agent could not be removed', id, count: cards.length };
+    })()`, true);
+    record(results, logFile, { name: 'settings lists the agents and one can be added and removed', ok: agents && agents.ok, detail: agents && !agents.ok ? `${agents.reason} (${agents.count || 0} listed)` : '' });
+
+    await showAccountPage('#settings');
+    await waitFor(win, `!document.querySelector('#view-settings').hidden`, 20000);
 
     await win.webContents.executeJavaScript(`(() => {
-      document.querySelector('#btn-back-router').click();
+      document.querySelector('#btn-settings-back').click();
       return true;
     })()`, true);
     const backToRouter = await waitFor(win, `location.href.includes('pages/home/index.html')`, 30000);
-    record(results, logFile, { name: 'going back returns the window to the router', ok: backToRouter, detail: backToRouter ? '' : 'router did not come back' });
+    record(results, logFile, { name: 'the settings back button returns to the router', ok: backToRouter, detail: backToRouter ? '' : 'router did not come back' });
 
-    await showAccountPage('#account');
-    await waitFor(win, `!document.querySelector('#view-account').hidden`, 20000);
+    await showAccountPage('#settings');
+    await waitFor(win, `!document.querySelector('#view-settings').hidden`, 20000);
     await lockApp();
     const lockedFromAccount = await waitFor(win, `!document.querySelector('#view-auth').hidden`, 20000);
-    record(results, logFile, { name: 'locking from account management returns to sign in', ok: lockedFromAccount, detail: lockedFromAccount ? '' : 'sign-in page never appeared' });
+    record(results, logFile, { name: 'locking from settings returns to sign in', ok: lockedFromAccount, detail: lockedFromAccount ? '' : 'sign-in page never appeared' });
 
     const signIn = async () => {
       await win.webContents.executeJavaScript(`(() => {
@@ -248,14 +366,14 @@ async function runSelfTest({ app, window: win, lockApp, showAccountPage, logFile
 
     record(results, logFile, { name: 'signing in again reopens the router', ok: await signIn(), detail: '' });
 
-    await showAccountPage('#account');
-    await waitFor(win, `!document.querySelector('#view-account').hidden`, 20000);
+    await showAccountPage('#settings');
+    await waitFor(win, `!document.querySelector('#view-settings').hidden`, 20000);
     await win.webContents.executeJavaScript(`(() => {
       document.querySelector('#btn-logout').click();
       return true;
     })()`, true);
     const signedOutFromPage = await waitFor(win, `!document.querySelector('#view-auth').hidden`, 20000);
-    record(results, logFile, { name: 'signing out from account management returns to sign in', ok: signedOutFromPage, detail: signedOutFromPage ? '' : 'sign-in page never appeared' });
+    record(results, logFile, { name: 'signing out from settings returns to sign in', ok: signedOutFromPage, detail: signedOutFromPage ? '' : 'sign-in page never appeared' });
 
     const afterLogout = await win.webContents.executeJavaScript(
       `(async () => (await window.gate.reveal()).reason)()`,

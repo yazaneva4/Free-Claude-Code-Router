@@ -1,6 +1,6 @@
 {
   "name": "claude-code-router",
-  "version": "1.0.0",
+  "version": "3.1.1",
   "private": true,
   "description": "Claude Code Router: local LLM router for LM Studio, Ollama and llama.cpp with a real account system",
   "main": "src/main/main.js",

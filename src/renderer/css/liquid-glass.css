@@ -1,0 +1,165 @@
+/*
+ * Liquid glass over the router page.
+ *
+ * The bundled router ships a light, flat theme (--background: #f6f7f8) on a
+ * window whose own background is white, so opening the app flashed white and
+ * the page read as a blank sheet of paper. This is injected after every router
+ * load. It only restyles: it adds no scripts and no behaviour.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /*
+   * The router's own root fills the window, so a solid colour here would hide
+   * the lights behind it. Keeping it translucent is what makes the glass read.
+   */
+  --background: rgba(11, 16, 32, 0.72);
+  --foreground: #eef2ff;
+
+  --card: rgba(255, 255, 255, 0.07);
+  --card-foreground: #eef2ff;
+  --popover: rgba(24, 30, 54, 0.82);
+  --sidebar: rgba(16, 21, 40, 0.55);
+  --sidebar-foreground: #eef2ff;
+  --sidebar-border: rgba(255, 255, 255, 0.14);
+  --sidebar-accent: rgba(122, 162, 255, 0.16);
+  --sidebar-accent-foreground: #eef2ff;
+  --popover-foreground: #eef2ff;
+
+  --primary: #7aa2ff;
+  --primary-foreground: #06122b;
+  --secondary: rgba(255, 255, 255, 0.09);
+  --secondary-foreground: #eef2ff;
+  --muted: rgba(233, 238, 255, 0.68);
+  --muted-foreground: rgba(233, 238, 255, 0.68);
+  --accent: rgba(122, 162, 255, 0.18);
+
+  --border: rgba(255, 255, 255, 0.14);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: rgba(122, 162, 255, 0.7);
+
+  --destructive: #ff7a7a;
+  --radius: 0.9rem;
+
+  --glass-blur: 26px;
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-shadow: 0 18px 48px -18px rgba(3, 6, 18, 0.85);
+  --glass-sheen: rgba(255, 255, 255, 0.14);
+}
+
+html,
+body {
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+}
+
+body {
+  /* Three soft lights behind the glass, so the blur has something to pick up. */
+  background-image: radial-gradient(58rem 42rem at 8% -8%, rgba(96, 128, 255, 0.34), transparent 62%),
+    radial-gradient(46rem 38rem at 96% 4%, rgba(168, 108, 255, 0.28), transparent 60%),
+    radial-gradient(52rem 44rem at 50% 108%, rgba(64, 214, 214, 0.2), transparent 62%),
+    linear-gradient(180deg, #0b1020 0%, #0a0f1d 52%, #080c17 100%) !important;
+  background-attachment: fixed !important;
+  background-repeat: no-repeat !important;
+}
+
+/*
+ * The glass itself. Every surface the router draws gets a translucent, blurred
+ * body with a hairline edge and a light catching the top of the panel.
+ */
+body :where(
+    .app-sidebar,
+    .app-drag,
+    .app-window-controls,
+    header,
+    aside,
+    nav,
+    [role="navigation"],
+    [data-sidebar],
+    [data-slot="sidebar"]
+  ) {
+  background-color: rgba(16, 21, 40, 0.55) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--glass-shadow);
+}
+
+body :where(
+    [data-slot="card"],
+    [data-slot="dialog-content"],
+    [data-slot="popover-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="tooltip-content"],
+    [role="dialog"],
+    [role="menu"],
+    [role="listbox"],
+    [data-radix-popper-content-wrapper] > div,
+    [class*="bg-card"],
+    [class*="bg-popover"]
+  ) {
+  background-color: rgba(20, 26, 48, 0.62) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(175%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(175%);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-sheen);
+}
+
+/* The window's own title strip reads as a pane of glass, not a solid bar. */
+body .app-drag {
+  background-color: rgba(13, 18, 36, 0.5) !important;
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 10px 30px -20px rgba(3, 6, 18, 0.9), inset 0 1px 0 var(--glass-sheen);
+}
+
+/* Buttons and inputs read as glass chips rather than flat rectangles. */
+body :where(button, [role="button"], a.button, .btn) {
+  border-radius: calc(var(--radius) - 0.25rem) !important;
+  transition: transform 120ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+body :where(button, [role="button"]):active {
+  transform: scale(0.985);
+}
+
+body :where(input, textarea, select, [data-slot="input"], [data-slot="select-trigger"]) {
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: calc(var(--radius) - 0.25rem) !important;
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  color: var(--foreground) !important;
+}
+
+body :where(input, textarea)::placeholder {
+  color: rgba(233, 238, 255, 0.45) !important;
+}
+
+/* Solid fills stay legible on top of the glass. */
+body :where(button, [role="button"], a) :where(span, p, svg) {
+  text-shadow: 0 1px 2px rgba(4, 8, 20, 0.35);
+}
+
+body :where(table, [role="table"]) :where(th, td, tr:nth-child(odd)) {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-color: var(--glass-border) !important;
+}
+
+body ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+
+body ::selection {
+  background: rgba(122, 162, 255, 0.35);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body :where(header, aside, nav, [role="navigation"], [data-slot="card"], [role="dialog"]) {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: #141a30 !important;
+  }
+}

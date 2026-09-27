@@ -22,6 +22,9 @@ const ACCOUNT_URL = pathToFileURL(ACCOUNT_PAGE).toString();
 const ROUTER_URL = pathToFileURL(ROUTER_HOME).toString();
 const RESOURCES_URL = decodeURIComponent(pathToFileURL(CCR_RESOURCES).toString()).replace(/\/$/, '');
 const CHAINED_PRELOAD = path.join(__dirname, '..', 'preload', 'chained.js');
+const GLASS_CSS = path.join(__dirname, '..', 'renderer', 'css', 'liquid-glass.css');
+/* The window's own paint, so opening the app never flashes white. */
+const WINDOW_BACKGROUND = '#0b1020';
 const HOME_DIR = os.homedir();
 const CCR_HOME = path.join(HOME_DIR, '.claude-code-router');
 const USER_DATA = process.env.CCR_INTERNAL_USER_DATA_DIR || process.env.CCR_USER_DATA || path.join(CCR_HOME, 'app-data');
@@ -51,6 +54,11 @@ const { Vault } = require('./vault');
 const { Settings } = require('./settings');
 const { registerIpc, result, failure } = require('./ipc');
 const lifecycle = require('./lifecycle');
+const { SyncWorker } = require('./sync');
+const updates = require('./updates');
+const { UpdateService, silenceBundledUpdater } = require('./update-service');
+const apiKeyHelper = require('./api-key-helper');
+const agentsRuntime = require('./agents');
 
 const lifecycleState = { authenticated: false, quitting: false, windowClosedAt: 0 };
 
@@ -59,6 +67,7 @@ let vault = null;
 let settings = null;
 let crypto = null;
 let mainWindow = null;
+let syncWorker = null;
 let currentPage = null;
 let authenticated = false;
 
@@ -69,6 +78,35 @@ function createServices() {
   accounts = new AccountService({ store, crypto, purge: (id) => vault.deleteAllForAccount(id) });
   settings = new Settings({ store });
   return { store, crypto, accounts, vault, settings };
+}
+
+function applyWindowBackdrop(win) {
+  // Electron paints a fresh window white before the first frame lands, which is
+  // what made the app open as a white rectangle.
+  try {
+    win.setBackgroundColor(WINDOW_BACKGROUND);
+  } catch {}
+  if (win.webContents && typeof win.webContents.insertCSS === 'function') {
+    win.webContents.on('did-finish-load', () => injectGlass(win));
+    win.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+      if (isMainFrame) setImmediate(() => injectGlass(win));
+    });
+  }
+}
+
+/**
+ * Puts the glass back after the router re-renders or navigates inside itself,
+ * because a client-side route change replaces the document styles.
+ */
+function injectGlass(win) {
+  if (!win || win.isDestroyed() || currentPage !== 'router') return;
+  let css;
+  try {
+    css = fs.readFileSync(GLASS_CSS, 'utf8');
+  } catch {
+    return;
+  }
+  win.webContents.insertCSS(css).catch(() => {});
 }
 
 function isPageUrl(url) {
@@ -88,6 +126,7 @@ function isBundledUrl(url) {
 
 function adoptRouterWindow(win) {
   mainWindow = win;
+  applyWindowBackdrop(win);
   const real = {
     loadURL: win.loadURL.bind(win),
     loadFile: win.loadFile.bind(win),
@@ -221,7 +260,7 @@ function addGateMenu() {
   const existing = Menu.getApplicationMenu();
   const template = existing ? toTemplate(existing.items) : [];
   const gateItems = [
-    { label: 'Account…', accelerator: 'Cmd+,', click: () => showAccountPage('#account') },
+    { label: 'Account and Settings…', click: () => showAccountPage('#settings') },
     { label: 'Lock and Sign Out', accelerator: 'Cmd+Shift+L', click: () => lockApp() },
     { type: 'separator' },
   ];
@@ -296,18 +335,100 @@ Module._load = function loadForRouter(request, parent, isMain) {
   return loaded;
 };
 
+let ipcApi = null;
+
+// The bundle we ship inside keeps the upstream app's own version number, so
+// app.getVersion() would report that one. Ours is the package we pack.
+function gateVersion() {
+  try {
+    return require('../../package.json').version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+let updateService = null;
+
+function scheduleStartupChecks() {
+  // Repaired before anything else, because a harness config pointing at a key
+  // helper that is not there makes every agent start fail with `exited 127`.
+  try {
+    const helpers = apiKeyHelper.repairHelper();
+    for (const change of helpers.repointed) {
+      log(`key helper repointed: ${path.basename(change.from)} -> ${path.basename(change.to)} (${change.file})`);
+    }
+    for (const file of helpers.created) log(`key helper written: ${path.basename(file)}`);
+    if (!helpers.ok && helpers.error) log(`key helper problem: ${helpers.error}`);
+  } catch (err) {
+    log(`key helper check failed: ${err && err.message ? err.message : err}`);
+  }
+  const timer = setTimeout(async () => {
+    try {
+      const active = accounts && accounts.session();
+      if (!active) return;
+      const gateway = require('./gateway');
+      const status = await gateway.listModels({ endpoint: (settings.get().gateway || {}).endpoint });
+      log(`gateway check: HTTP ${status.status}, ${status.models.length} models available`);
+      try {
+        const again = apiKeyHelper.repairHelper();
+        for (const change of again.repointed) {
+          log(`key helper repointed: ${path.basename(change.from)} -> ${path.basename(change.to)} (${change.file})`);
+        }
+      } catch (err) {
+        log(`key helper recheck failed: ${err && err.message ? err.message : err}`);
+      }
+      if (updateService) {
+        const found = await updateService.check();
+        if (found.updateAvailable) log(`update available: ${found.latestVersion} (not installed without asking)`);
+      }
+      const configured = settings.get().gateway || {};
+      const current = require('./profile-writer').readModel();
+      if (current) {
+        const result = await gateway.probeModel(current.model, { endpoint: configured.endpoint });
+        log(`active model ${current.model}: ${result.kind}${result.ok ? '' : ` (HTTP ${result.httpStatus})`}`);
+        if (!result.ok && configured.autoRepair !== false && ipcApi) {
+          const repaired = await ipcApi.repairGateway({ model: current.model });
+          log(
+            repaired.repaired
+              ? `gateway repaired: ${current.model} -> ${repaired.model}`
+              : `gateway could not find a working model (${repaired.tried.map((try_) => `${try_.model} ${try_.kind}`).join(', ') || 'no models offered'})`,
+          );
+        }
+      }
+      const detected = agentsRuntime.detect().filter((entry) => entry.installed);
+      log(`agents installed but not connected: ${detected.map((entry) => entry.id).join(', ') || 'none'}`);
+    } catch (err) {
+      log(`startup check failed: ${err && err.message ? err.message : err}`);
+    }
+  }, 4000);
+  if (typeof timer.unref === 'function') timer.unref();
+}
+
 const agentPath = require('./agent-env').ensureAgentPath();
 if (agentPath.added.length) {
   log(`harness PATH extended with: ${agentPath.added.join(', ')}`);
 }
+
+// Electron paints every new window white until the first frame arrives. This
+// runs before the router can create its window, so opening the app never shows
+// a white rectangle.
+app.on('browser-window-created', (_event, win) => {
+  try {
+    win.setBackgroundColor(WINDOW_BACKGROUND);
+  } catch {}
+});
 
 log(`bootstrap starting (router asar: ${ROUTER_ASAR})`);
 if (!fs.existsSync(CCR_MAIN)) {
   log(`fatal: router main missing at ${CCR_MAIN}`);
   app.quit();
 } else {
+  // Before the router wires its own Squirrel updater, which cannot install for
+  // an ad-hoc signed build and is fed the wrong releases.
+  if (silenceBundledUpdater()) log('bundled auto-updater disabled; this build updates itself');
   require(CCR_MAIN);
   log('router main loaded');
+  scheduleStartupChecks();
 }
 
 ipcMain.handle('gate:reveal', async () => {
@@ -320,7 +441,18 @@ ipcMain.handle('gate:reveal', async () => {
 
 async function bootstrap() {
   const services = createServices();
-  registerIpc({ ipcMain, onSessionEnded, ...services });
+  const sync = new SyncWorker({
+    settings: services.settings,
+    vault: services.vault,
+    accounts,
+    resolveEndpoint: () => {
+      const active = accounts.session();
+      return active && active.account ? active.account.syncEndpoint || null : null;
+    },
+  });
+  syncWorker = sync;
+  updateService = new UpdateService({ currentVersion: gateVersion(), log });
+  ipcApi = registerIpc({ ipcMain, onSessionEnded, sync, updateService, appVersion: gateVersion(), ...services });
 
   let win;
   try {
@@ -350,6 +482,13 @@ async function bootstrap() {
   if (SELFTEST) {
     const { runSelfTest } = require('./selftest');
     await runSelfTest({ app, window: win, revealApp, lockApp, showAccountPage, logFile: SELFTEST_FILE });
+    // The selftest drives this window through every page. Left running it kept
+    // flipping pages in the background, and because it holds the single
+    // instance lock the next ordinary launch was handed that same window
+    // instead of opening a clean one. It leaves nothing behind.
+    log('selftest finished, closing the test instance');
+    app.exit(0);
+    return;
   }
 }
 
@@ -388,4 +527,4 @@ app.on('activate', () => {
   }
 });
 
-module.exports = { revealApp, lockApp, showAccountPage, bootstrap, agentPath, lifecycleState };
+module.exports = { revealApp, lockApp, showAccountPage, bootstrap, agentPath, lifecycleState, scheduleStartupChecks, getUpdateService: () => updateService };

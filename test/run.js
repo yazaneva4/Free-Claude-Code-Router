@@ -13,6 +13,14 @@ const { Settings } = require('../src/main/settings');
 const providers = require('../src/main/providers');
 const harnesses = require('../src/main/harnesses');
 const agentEnv = require('../src/main/agent-env');
+const gateway = require('../src/main/gateway');
+const agents = require('../src/main/agents');
+const updates = require('../src/main/updates');
+const { SyncWorker } = require('../src/main/sync');
+const profileWriter = require('../src/main/profile-writer');
+const updater = require('../src/main/updater');
+const { UpdateService, silenceBundledUpdater } = require('../src/main/update-service');
+const apiKeyHelper = require('../src/main/api-key-helper');
 
 let passed = 0;
 let failed = 0;
@@ -349,6 +357,474 @@ test('an unsupported provider is refused everywhere it could be added', async ()
   for (const id of banned) assert.ok(!listed.includes(id.toLowerCase()), 'the catalog never offers it');
 });
 
+test('a provider refusal is reported as what it is, not as a gateway error', () => {
+  assert.strictEqual(gateway.classifyStatus(200, '{}'), 'ok');
+  assert.strictEqual(gateway.classifyStatus(429, '{"error":{"message":"Rate limit exceeded: free-models-per-day"}}'), 'quota');
+  assert.strictEqual(gateway.classifyStatus(429, ''), 'quota');
+  assert.strictEqual(gateway.classifyStatus(200, 'quota exceeded'), 'quota', 'the body decides when the status does not');
+  assert.strictEqual(gateway.classifyStatus(502, '{"error":{"message":"All target providers failed."}}'), 'unavailable');
+  assert.strictEqual(gateway.classifyStatus(401, ''), 'auth');
+  assert.strictEqual(gateway.classifyStatus(403, ''), 'auth');
+  assert.strictEqual(gateway.classifyStatus(500, 'boom'), 'unknown');
+  assert.ok(!/gateway/i.test(gateway.MESSAGES.quota), 'a quota stop is never called a gateway error');
+  assert.ok(/quota|daily/i.test(gateway.MESSAGES.quota));
+  assert.ok(/Load the model|pick another/i.test(gateway.MESSAGES.unavailable));
+});
+
+test('a model that hits its quota is remembered and hidden from the picker', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-gw-'));
+  assert.deepStrictEqual(gateway.readBlocked(home), {});
+  gateway.rememberBlocked('OpenRouter/cohere/north-mini-code:free', { kind: 'quota' }, home);
+  assert.ok(gateway.isBlocked('OpenRouter/cohere/north-mini-code:free', home));
+  assert.ok(gateway.readBlocked(home)['OpenRouter/cohere/north-mini-code:free'].kind === 'quota');
+  gateway.rememberBlocked('ollama/llama3.2:1b', { kind: 'unavailable' }, home);
+  assert.ok(!gateway.isBlocked('ollama/llama3.2:1b', home), 'a provider outage does not hide a model');
+  gateway.rememberBlocked('OpenRouter/cohere/north-mini-code:free', { kind: 'ok' }, home);
+  assert.ok(!gateway.isBlocked('OpenRouter/cohere/north-mini-code:free', home), 'a model that answers is offered again');
+  gateway.rememberBlocked('OpenRouter/x:free', { kind: 'quota' }, home);
+  gateway.clearBlocked(home);
+  assert.deepStrictEqual(gateway.readBlocked(home), {});
+  assert.ok(gateway.looksLocal('ollama/llama3.2:1b') && gateway.looksLocal('lmstudio/qwen/qwen3-1.7b'));
+  assert.ok(!gateway.looksLocal('OpenRouter/cohere/north-mini-code:free'));
+});
+
+test('the working model is chosen by probing, and local models are preferred', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-gw2-'));
+  const asked = [];
+  const fetchImpl = async (_url, options) => {
+    const model = JSON.parse(options.body).model;
+    asked.push(model);
+    if (model === 'OpenRouter/cohere/north-mini-code:free') {
+      return { ok: false, status: 429, text: async () => '{"error":{"message":"Rate limit exceeded: free-models-per-day"}}' };
+    }
+    if (model === 'lmstudio/qwen/qwen3-1.7b') {
+      return { ok: false, status: 502, text: async () => '{"error":{"message":"All target providers failed."}}' };
+    }
+    return { ok: true, status: 200, text: async () => '{"content":[{"type":"text","text":"pong"}]}' };
+  };
+  const found = await gateway.findWorkingModel(
+    'OpenRouter/cohere/north-mini-code:free',
+    ['OpenRouter/cohere/north-mini-code:free', 'lmstudio/qwen/qwen3-1.7b', 'ollama/llama3.2:1b'],
+    { home, fetchImpl, endpoint: 'http://127.0.0.1:3456', token: 't' },
+  );
+  assert.strictEqual(found.model, 'ollama/llama3.2:1b', 'the model that answers wins');
+  assert.deepStrictEqual(asked, ['OpenRouter/cohere/north-mini-code:free', 'lmstudio/qwen/qwen3-1.7b', 'ollama/llama3.2:1b']);
+  assert.strictEqual(found.tried[0].kind, 'quota');
+  assert.strictEqual(found.tried[1].kind, 'unavailable');
+  assert.strictEqual(found.tried[2].kind, 'ok');
+  assert.ok(gateway.isBlocked('OpenRouter/cohere/north-mini-code:free', home), 'the capped model is remembered');
+
+  const none = await gateway.findWorkingModel('a', ['b'], {
+    home,
+    endpoint: 'http://127.0.0.1:3456',
+    fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'boom' }),
+  });
+  assert.strictEqual(none.model, null);
+});
+
+test('an installed agent is never connected without being added', () => {
+  const h = harness();
+  const detected = agents.detect({
+    env: { PATH: '/usr/bin' },
+    home: '/Users/someone',
+    exists: (dir) => String(dir).includes('Claude.app'),
+  });
+  const claudeCode = detected.find((entry) => entry.id === 'claude-code');
+  assert.strictEqual(claudeCode.installed, false, 'no claude binary on the PATH');
+  assert.strictEqual(detected.find((entry) => entry.id === 'claude-app').installed, true, 'Claude.app is installed');
+
+  const before = h.settings.get();
+  assert.deepStrictEqual(before.agents.profiles, {}, 'detection alone changes nothing');
+  const listed = agents.listAgents(before);
+  for (const agent of listed) {
+    assert.strictEqual(agent.added, false);
+    assert.strictEqual(agent.enabled, false);
+    assert.strictEqual(agent.needsLogin, false, 'no agent login is ever collected');
+  }
+  assert.ok(listed.find((agent) => agent.id === 'claude-code').paid, 'a paid agent is marked paid');
+  assert.deepStrictEqual(h.settings.get().agents.profiles, {}, 'listing does not connect anything');
+});
+
+test('agent profiles keep built-in models and refuse what the router will not use', () => {
+  const h = harness();
+  const known = ['ollama/llama3.2:1b', 'lmstudio/qwen/qwen3-1.7b'];
+  const profiles = agents.addProfile(h.settings.get(), 'claude-code', { enabled: true, model: 'ollama/llama3.2:1b' }, { knownModels: known });
+  const saved = h.settings.setAgentProfiles(profiles);
+  assert.strictEqual(saved.agents.profiles['claude-code'].model, 'ollama/llama3.2:1b', 'a paid agent keeps a real model');
+  assert.strictEqual(saved.agents.profiles['claude-code'].enabled, true);
+  assert.ok(!('secret' in saved.agents.profiles['claude-code']), 'no credential is stored for an agent');
+
+  const publicAgent = agents.listAgents(saved, { knownModels: known }).find((agent) => agent.id === 'claude-code');
+  assert.deepStrictEqual(publicAgent.gatewayModels, known, 'the models the gateway serves are offered for a paid agent');
+  assert.deepStrictEqual(publicAgent.ownModels, [], 'nothing is claimed as a built-in before the agent was asked');
+  assert.strictEqual(publicAgent.needsLogin, false);
+
+  assert.throws(() => agents.updateProfile(saved, 'claude-code', { model: 'hf/gpt-oss' }, { knownModels: known }), (err) => err.code === 'forbidden_model');
+  assert.throws(() => agents.updateProfile(saved, 'claude-code', { model: 'made/up' }, { knownModels: known }), (err) => err.code === 'unknown_model');
+  assert.throws(() => agents.updateProfile(saved, 'claude-code', { baseUrl: 'https://evil.example.com' }), (err) => err.code === 'invalid_base_url');
+  assert.throws(() => agents.addProfile(saved, 'huggingface', {}), (err) => err.code === 'unknown_agent');
+  assert.throws(() => agents.updateProfile(saved, 'codex-cli', {}), (err) => err.code === 'profile_not_added');
+  assert.throws(() => agents.validateModel('huggingface/gpt'), (err) => err.code === 'forbidden_model');
+  assert.strictEqual(agents.validateModel('auto'), 'auto');
+
+  const removed = h.settings.setAgentProfiles(agents.removeProfile(saved, 'claude-code'));
+  assert.deepStrictEqual(removed.agents.profiles, {});
+});
+
+test('the agent model is written into the profile the router manages', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-prof-'));
+  const dir = path.join(home, '.claude-code-router', 'profiles', 'claude-code', 'claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({ env: { ANTHROPIC_MODEL: 'lmstudio/qwen/qwen3-1.7b', ANTHROPIC_BASE_URL: 'http://127.0.0.1:3456' }, theme: 'dark' }));
+  assert.strictEqual(profileWriter.readModel({ home }).model, 'lmstudio/qwen/qwen3-1.7b');
+  const applied = profileWriter.applyModel('ollama/llama3.2:1b', { home });
+  assert.strictEqual(applied.length, 1);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.strictEqual(after.env.ANTHROPIC_MODEL, 'ollama/llama3.2:1b');
+  assert.strictEqual(after.env.CCR_CLAUDE_CODE_MODEL, 'ollama/llama3.2:1b');
+  assert.strictEqual(after.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:3456', 'the endpoint is left alone');
+  assert.strictEqual(after.theme, 'dark', 'other settings survive');
+  assert.deepStrictEqual(profileWriter.applyModel('ollama/llama3.2:1b', { home }), [], 'writing twice changes nothing');
+});
+
+test('a repair only rewrites the profile that was actually broken', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-fix-'));
+  const write = (id, relative, model) => {
+    const dir = path.join(home, '.claude-code-router', 'profiles', id, path.dirname(relative));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, path.basename(relative));
+    fs.writeFileSync(file, JSON.stringify({ env: { ANTHROPIC_MODEL: model } }));
+    return file;
+  };
+  const broken = write('claude-code', 'claude/settings.json', 'OpenRouter/cohere/north-mini-code:free');
+  const fine = write('codex-cli', 'claude/settings.json', 'ollama/llama3.2:1b');
+
+  const applied = profileWriter.applyModel('ollama/llama3.2:1b', { home, profileId: 'claude-code' });
+  assert.strictEqual(applied.length, 1, 'only the named profile is touched');
+  assert.strictEqual(applied[0].file, broken);
+  assert.strictEqual(JSON.parse(fs.readFileSync(broken, 'utf8')).env.ANTHROPIC_MODEL, 'ollama/llama3.2:1b');
+  assert.strictEqual(JSON.parse(fs.readFileSync(fine, 'utf8')).env.ANTHROPIC_MODEL, 'ollama/llama3.2:1b');
+  assert.strictEqual(profileWriter.settingsFiles(home).length, 2, 'every profile is still listed');
+  assert.strictEqual(profileWriter.settingsFiles(home, 'claude-code').length, 1, 'one profile can be listed on its own');
+  assert.strictEqual(profileWriter.readModel({ home, profileId: 'codex-cli' }).model, 'ollama/llama3.2:1b');
+});
+
+test('the update check compares versions without inventing one', async () => {
+  assert.deepStrictEqual(updates.parseVersion('v1.2.3'), { major: 1, minor: 2, patch: 3 });
+  assert.deepStrictEqual(updates.parseVersion('2.0'), null);
+  assert.strictEqual(updates.compareVersions('1.2.4', '1.2.3'), 1);
+  assert.strictEqual(updates.compareVersions('1.2.3', '1.2.3'), 0);
+  assert.strictEqual(updates.compareVersions('1.1.9', '1.2.0'), -1);
+  assert.strictEqual(updates.compareVersions('nope', '1.0.0'), null);
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-upd-'));
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ tag_name: 'v9.9.9', html_url: 'https://example.invalid/r', body: 'notes' }) });
+  const state = await updates.check({ currentVersion: '1.0.0', home, fetchImpl, now: 1000 });
+  assert.strictEqual(state.updateAvailable, true);
+  assert.strictEqual(state.latestVersion, '9.9.9');
+  const same = await updates.check({ currentVersion: '9.9.9', home, fetchImpl, now: 2000 });
+  assert.strictEqual(same.updateAvailable, false, 'being on the newest version is not an update');
+  const none = await updates.check({
+    currentVersion: '1.0.0',
+    home: fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-upd2-')),
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+    now: 1000,
+  });
+  assert.strictEqual(none.ok, true, 'a repository with no release is not an error');
+  assert.strictEqual(none.noRelease, true);
+  assert.strictEqual(none.updateAvailable, false);
+  assert.strictEqual(none.error, null, 'it does not claim the network failed');
+  const offline = await updates.check({ currentVersion: '1.0.0', home, force: true, fetchImpl: async () => { throw new Error('offline'); }, now: 3000 });
+  assert.strictEqual(offline.ok, false);
+  assert.ok(/Could not reach/.test(offline.error));
+  assert.strictEqual(offline.latestVersion, '9.9.9', 'the last known version is kept when offline');
+});
+
+test('settings are pushed to the sync endpoint and pulled back', async () => {
+  const h = harness();
+  const seen = [];
+  const worker = new SyncWorker({
+    settings: h.settings,
+    resolveEndpoint: () => 'https://sync.example.com',
+    fetchImpl: async (url, options = {}) => {
+      seen.push({ url, method: options.method || 'GET' });
+      if (options.method === 'POST') return { ok: true, status: 200, text: async () => '{"ok":true}' };
+      return { ok: true, status: 200, json: async () => ({ sentAt: '2026-01-01T00:00:00.000Z', agents: { profiles: { 'gemini-cli': { enabled: true, model: 'auto', baseUrl: 'http://127.0.0.1:3456' } } } }) };
+    },
+  });
+  const pushed = await worker.push();
+  assert.strictEqual(pushed.ok, true);
+  assert.strictEqual(seen[0].url, 'https://sync.example.com/ccr/settings');
+  assert.strictEqual(seen[0].method, 'POST');
+  const pulled = await worker.pull();
+  assert.strictEqual(pulled.ok, true);
+  assert.ok(h.settings.get().agents.profiles['gemini-cli'], 'a pulled profile is applied');
+  worker.stop();
+
+  const off = new SyncWorker({ settings: h.settings, resolveEndpoint: () => null, fetchImpl: async () => { throw new Error('should not run'); } });
+  assert.deepStrictEqual(await off.push(), { ok: false, skipped: true, reason: 'no_endpoint' });
+  off.stop();
+});
+
+test('a synced or hand-edited file cannot smuggle in what we refuse', () => {
+  const h = harness();
+  assert.throws(
+    () => h.settings.save({ ...h.settings.get(), providers: { ...h.settings.get().providers, huggingface: { enabled: true } } }),
+    (err) => err.code === 'unsupported_provider',
+  );
+  assert.throws(
+    () => h.settings.save({ ...h.settings.get(), routing: { ...h.settings.get().routing, modelByProvider: { made_up: 'x' } } }),
+    (err) => err.code === 'unknown_provider',
+  );
+  assert.throws(
+    () => h.settings.save({ ...h.settings.get(), gateway: { ...h.settings.get().gateway, hiddenModels: ['hf/gpt-oss'] } }),
+    (err) => err.code === 'forbidden_model',
+  );
+  assert.throws(
+    () => h.settings.save({ ...h.settings.get(), agents: { profiles: { 'evil-agent': { enabled: true } } } }),
+    (err) => err.code === 'unknown_agent',
+  );
+  assert.throws(
+    () => h.settings.save({ ...h.settings.get(), agents: { profiles: { 'claude-code': { baseUrl: 'https://evil.example.com' } } } }),
+    (err) => err.code === 'invalid_base_url',
+  );
+  const withJunk = h.settings.save({
+    ...h.settings.get(),
+    integrations: { app: { sneaky: { enabled: true } }, cli: { ...h.settings.get().integrations.cli } },
+  });
+  assert.ok(!('sneaky' in withJunk.integrations.app), 'an integration that does not exist is dropped');
+  assert.ok(withJunk.integrations.cli.gemini, 'the real integrations are untouched');
+  const untouched = h.settings.get();
+  assert.deepStrictEqual(untouched.agents.profiles, {}, 'a refused write changes nothing on disk');
+  assert.ok(untouched.providers.ollama, 'the real settings are still intact');
+});
+
+test('settings pushed to a sync endpoint keep their refusals when they come back', async () => {
+  const h = harness();
+  const worker = new SyncWorker({
+    settings: h.settings,
+    resolveEndpoint: () => 'https://sync.example.com',
+    fetchImpl: async (_url, options = {}) => {
+      if (options.method === 'POST') return { ok: true, status: 200, text: async () => '{"ok":true}' };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          providers: { huggingface: { enabled: true } },
+          agents: { profiles: { 'claude-code': { enabled: true, model: 'hf/gpt-oss' } } },
+        }),
+      };
+    },
+  });
+  const pulled = await worker.pull();
+  assert.strictEqual(pulled.ok, false, 'a hostile payload is not applied');
+  assert.ok(/huggingface|not supported|unsupported/i.test(pulled.error), pulled.error);
+  assert.deepStrictEqual(h.settings.get().agents.profiles, {}, 'nothing from the payload landed');
+  assert.ok(!('huggingface' in h.settings.get().providers));
+  worker.stop();
+});
+
+test('an agent is only asked for models through a command its own help advertises', async () => {
+  const run = (script) => async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: script.help, stderr: '' };
+    return { ok: true, stdout: script.list, stderr: '' };
+  };
+
+  const advertised = await agents.discoverModels('claude-code', {
+    env: { PATH: '/usr/bin' },
+    binaryPath: '/usr/bin/claude',
+    run: run({ help: 'Commands:\n  run     start a session\n  list-models  show what this plan can use\n', list: 'claude-opus-4-5\nclaude-sonnet-4-5\ngpt-4o-mini\n' }),
+  });
+  assert.strictEqual(advertised.source, 'agent');
+  assert.deepStrictEqual(advertised.models, ['claude-opus-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini']);
+  assert.strictEqual(advertised.command, 'list-models');
+
+  const silent = await agents.discoverModels('claude-code', {
+    env: { PATH: '/usr/bin' },
+    binaryPath: '/usr/bin/claude',
+    run: run({ help: 'Commands:\n  run   start a session\n', list: '' }),
+  });
+  assert.deepStrictEqual(silent.models, []);
+  assert.strictEqual(silent.source, 'needs-subscription', 'a paid agent waits for the plan that carries its models');
+  assert.strictEqual(silent.billed, true);
+  assert.ok(/pay for|pays for/i.test(silent.reason), 'and it says that paying is what reveals them');
+  assert.strictEqual(silent.command, undefined, 'a command that is not documented is never guessed at');
+  assert.ok(!silent.command);
+
+  const signIn = await agents.discoverModels('codex-cli', {
+    env: { PATH: '/usr/bin' },
+    binaryPath: '/usr/bin/codex',
+    run: run({ help: 'models  list models', list: 'Error: please log in to list models\n' }),
+  });
+  assert.strictEqual(signIn.source, 'needs-sign-in', 'we report the sign-in instead of asking for one');
+  assert.ok(!/password|token/i.test(signIn.reason), 'no credential is ever requested');
+  assert.deepStrictEqual(signIn.models, []);
+
+  const forbidden = await agents.discoverModels('gemini-cli', {
+    env: { PATH: '/usr/bin' },
+    binaryPath: '/usr/bin/gemini',
+    run: run({ help: 'models list', list: 'gemini-2.5-pro\nhf/gpt-oss\n' }),
+  });
+  assert.deepStrictEqual(forbidden.models, ['gemini-2.5-pro'], 'a refused model is never offered back');
+
+  const missing = await agents.discoverModels('codex-cli', { env: { PATH: '/usr/bin' }, run: async () => { throw new Error('must not run'); } });
+  assert.strictEqual(missing.source, 'not-installed');
+  const desktop = await agents.discoverModels('claude-app', { run: async () => { throw new Error('must not run'); } });
+  assert.strictEqual(desktop.source, 'not-askable', 'a desktop app is never asked');
+  assert.deepStrictEqual(desktop.models, []);
+});
+
+test('the model a profile may use is what the gateway serves or the agent reported', () => {
+  const h = harness();
+  const known = ['ollama/llama3.2:1b'];
+  const withOwn = agents.listAgents(h.settings.get(), {
+    knownModels: known,
+    discovered: { 'claude-code': { models: ['claude-opus-4-5'], source: 'agent' } },
+  }).find((agent) => agent.id === 'claude-code');
+  assert.deepStrictEqual(withOwn.ownModels, ['claude-opus-4-5']);
+  assert.deepStrictEqual(withOwn.gatewayModels, ['ollama/llama3.2:1b']);
+  assert.strictEqual(withOwn.ownModelsSource, 'agent');
+  const profiles = agents.addProfile(h.settings.get(), 'claude-code', { enabled: true }, { knownModels: known });
+  const withProfile = { ...h.settings.get(), agents: { profiles } };
+  const saved = agents.updateProfile(withProfile, 'claude-code', { model: 'claude-opus-4-5' }, { knownModels: ['claude-opus-4-5', 'ollama/llama3.2:1b'] });
+  assert.strictEqual(saved['claude-code'].model, 'claude-opus-4-5');
+  assert.throws(
+    () => agents.updateProfile(withProfile, 'claude-code', { model: 'made-up-9' }, { knownModels: known }),
+    (err) => err.code === 'unknown_model',
+  );
+});
+
+test('an API key saved on one device opens on another signed-in device', async () => {
+  const PASSWORD = 'correcthorse9';
+  const EMAIL = 'yazan@example.com';
+  const ENDPOINT = 'https://sync.example.com';
+
+  // A stand-in for the sync endpoint: it stores only what it is handed.
+  const wire = new Map();
+  const server = async (url, options = {}) => {
+    if (options.method === 'POST') {
+      wire.set(url, options.body);
+      return { ok: true, status: 200, text: async () => '{"ok":true}' };
+    }
+    if (!wire.has(url)) return { ok: false, status: 404, text: async () => '' };
+    return { ok: true, status: 200, json: async () => JSON.parse(wire.get(url)) };
+  };
+
+  const build = () => {
+    const h = harness();
+    h.accounts.signup({ email: EMAIL, password: PASSWORD, displayName: 'Yazan', storageMode: 'synced' });
+    h.accounts.updateProfile({ displayName: 'Yazan', storageMode: 'synced', syncEndpoint: ENDPOINT });
+    const worker = new SyncWorker({ settings: h.settings, vault: h.vault, accounts: h.accounts, resolveEndpoint: () => ENDPOINT, fetchImpl: server });
+    return { h, worker };
+  };
+
+  // ---- the device that saves the keys ----
+  const one = build();
+  const oneId = one.h.accounts.session().account.id;
+  one.h.vault.set(oneId, { providerId: 'ollama', secret: 'sk-local-ollama', label: 'Ollama' });
+  one.h.vault.set(oneId, { providerId: 'openai', secret: 'sk-real-openai', label: 'OpenAI' });
+  const pushed = await one.worker.pushVault();
+  assert.strictEqual(pushed.ok, true, pushed.error);
+  assert.strictEqual(pushed.shared, 2);
+
+  // Nothing readable left the device.
+  const body = [...wire.values()].join('');
+  assert.ok(!body.includes('sk-real-openai'), 'the endpoint never receives a key in the clear');
+  assert.ok(!body.includes('sk-local-ollama'));
+  assert.ok(!body.includes(EMAIL), 'the endpoint is given a handle, not an address');
+  assert.ok(!body.includes(oneId), 'the local account id is never published');
+
+  // ---- a second device, same account, signed in with the same password ----
+  const two = build();
+  const twoId = two.h.accounts.session().account.id;
+  assert.notStrictEqual(twoId, oneId, 'the two devices keep their own local account records');
+  assert.deepStrictEqual(two.h.vault.list(twoId), [], 'the second device starts with nothing');
+
+  const pulled = await two.worker.pullVault();
+  assert.strictEqual(pulled.ok, true, pulled.error);
+  assert.strictEqual(pulled.imported, 2);
+  const listed = two.h.vault.list(twoId).sort((a, b) => a.providerId.localeCompare(b.providerId));
+  assert.deepStrictEqual(listed.map((entry) => entry.providerId), ['ollama', 'openai']);
+  assert.ok(listed.every((entry) => entry.hasSecret));
+  assert.strictEqual(two.h.vault.secret(twoId, 'openai'), 'sk-real-openai', 'the key works on the second device');
+  assert.strictEqual(two.h.vault.secret(twoId, 'ollama'), 'sk-local-ollama');
+  assert.ok(!('secret' in listed[0]), 'the listing still never carries a key');
+
+  // ---- a device that is not the same account gets nothing ----
+  const stranger = harness();
+  stranger.accounts.signup({ email: 'someone-else@example.com', password: 'correcthorse9', displayName: 'Someone' });
+  stranger.accounts.updateProfile({ displayName: 'Someone', storageMode: 'synced', syncEndpoint: ENDPOINT });
+  const strangerSync = new SyncWorker({ settings: stranger.settings, vault: stranger.vault, accounts: stranger.accounts, resolveEndpoint: () => ENDPOINT, fetchImpl: server });
+  const strangerPull = await strangerSync.pullVault();
+  assert.strictEqual(strangerPull.ok, true);
+  assert.strictEqual(strangerPull.nothingSaved, true, 'another account sees none of these keys');
+  assert.deepStrictEqual(stranger.vault.list(stranger.accounts.session().account.id), []);
+
+  // ---- the wrong password cannot open them ----
+  const wrong = harness();
+  wrong.accounts.signup({ email: EMAIL, password: 'a different password 9', displayName: 'Yazan' });
+  wrong.accounts.updateProfile({ displayName: 'Yazan', storageMode: 'synced', syncEndpoint: ENDPOINT });
+  const wrongSync = new SyncWorker({ settings: wrong.settings, vault: wrong.vault, accounts: wrong.accounts, resolveEndpoint: () => ENDPOINT, fetchImpl: server });
+  const wrongPull = await wrongSync.pullVault();
+  assert.strictEqual(wrongPull.ok, false, 'a key sealed with another password is not opened');
+  assert.strictEqual(wrongPull.code, 'wrong_password');
+  assert.deepStrictEqual(wrong.vault.list(wrong.accounts.session().account.id), []);
+
+  // ---- a refused provider in an envelope is never imported ----
+  const hostile = new Map();
+  const { deriveVaultKey, encryptPortable } = require('../src/main/crypto');
+  const sealed = deriveVaultKey(PASSWORD, one.h.accounts.load().accounts[0].vaultSalt);
+  hostile.set(
+    'x',
+    JSON.stringify({
+      version: 1,
+      credentials: encryptPortable(
+        sealed,
+        JSON.stringify([
+          { providerId: 'huggingface', secret: 'sk-hostile' },
+          { providerId: 'ollama', secret: 'sk-fine' },
+        ]),
+      ),
+    }),
+  );
+  const three = build();
+  const threeId = three.h.accounts.session().account.id;
+  const imported = three.h.vault.importEnvelope(threeId, three.h.accounts.vaultKey(), JSON.parse(hostile.get('x')));
+  assert.strictEqual(imported.imported, 1, 'only the supported provider came in');
+  assert.strictEqual(three.h.vault.secret(threeId, 'ollama'), 'sk-fine');
+  assert.strictEqual(three.h.vault.find(threeId, 'huggingface'), null);
+
+  // ---- nothing to share, and no endpoint, are both reported, not thrown ----
+  assert.deepStrictEqual(await one.worker.pushVault({ endpoint: null }), { ok: false, skipped: true, reason: 'no_endpoint' });
+  const empty = harness();
+  empty.accounts.signup({ ...GOOD, storageMode: 'device' });
+  const emptySync = new SyncWorker({ settings: empty.settings, vault: empty.vault, accounts: empty.accounts, resolveEndpoint: () => ENDPOINT, fetchImpl: server });
+  const emptyPush = await emptySync.pushVault();
+  assert.strictEqual(emptyPush.ok, true);
+  assert.strictEqual(emptyPush.shared, 0, 'a device with no keys shares nothing rather than failing');
+});
+
+test('a device with no sync endpoint never claims to share anything', async () => {
+  const h = harness();
+  h.accounts.signup({ ...GOOD, storageMode: 'device' });
+  const worker = new SyncWorker({ settings: h.settings, vault: h.vault, accounts: h.accounts, resolveEndpoint: () => null });
+  assert.deepStrictEqual(await worker.pushVault(), { ok: false, skipped: true, reason: 'no_endpoint' });
+  assert.deepStrictEqual(await worker.pullVault(), { ok: false, skipped: true, reason: 'no_endpoint' });
+  worker.stop();
+});
+
+test('signing in again is what lets this device share keys', () => {
+  const h = harness();
+  h.accounts.signup({ ...GOOD, storageMode: 'synced' });
+  const before = h.accounts.vaultKey();
+  assert.ok(before && before.length === 32, 'signing in leaves a key that can seal credentials');
+  h.accounts.logout();
+  assert.strictEqual(h.accounts.vaultKey(), null, 'no key survives signing out');
+  h.accounts.login({ email: GOOD.email, password: GOOD.password });
+  assert.ok(h.accounts.vaultKey(), 'signing back in gives the key back without asking again');
+});
+
 test('the harnesses can find the agent CLIs the shell installed', () => {
   const home = '/Users/someone';
   const env = { PATH: '/usr/bin:/bin' };
@@ -575,4 +1051,771 @@ test('harness selections ignore unknown harnesses entirely', () => {
 Promise.all(pending).then(() => {
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+});
+
+/* ---------------------------------------------------------------- updates */
+
+/** The exact bytes of a buffer, without the slack a pooled allocation carries. */
+function exact(buffer) {
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length);
+}
+
+/** A stand-in for GitHub plus the release CDN, so the whole flow is exercised. */
+function updateFixture({ tag = 'v1.1.0', body = 'What changed', assets = null, build = null, published = true, checksumOverride = null } = {}) {
+  const state = { build: build || Buffer.from('not really a build'), requests: [] };
+  state.hash = updater.sha256(state.build);
+  const list = assets === null
+    ? [
+        { name: 'app.asar', browser_download_url: 'https://cdn.test/app.asar' },
+        { name: 'app.asar.sha256', browser_download_url: 'https://cdn.test/app.asar.sha256' },
+      ]
+    : assets;
+  const release = {
+    tag_name: tag,
+    body,
+    html_url: 'https://github.test/releases',
+    published_at: '2026-01-02T03:04:05Z',
+    assets: list,
+  };
+  const fetchImpl = async (url) => {
+    state.requests.push(url);
+    if (url.includes('/releases/latest')) {
+      if (!published) return { ok: false, status: 404, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => release };
+    }
+    if (url === 'https://cdn.test/app.asar') {
+      return { ok: true, status: 200, headers: { get: () => String(state.build.length) }, arrayBuffer: async () => exact(state.build) };
+    }
+    if (url === 'https://cdn.test/app.asar.sha256') {
+      const body = Buffer.from(checksumOverride === null ? `${state.hash}  app.asar\n` : checksumOverride, 'utf8');
+      return { ok: true, status: 200, headers: { get: () => String(body.length) }, arrayBuffer: async () => exact(body) };
+    }
+    return { ok: false, status: 404, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+  };
+  return { state, fetchImpl, release };
+}
+
+/** A packed asar written exactly the way scripts/pack-asar.js writes one. */
+function packAsar(files) {
+  const names = Object.keys(files).sort();
+  let offset = 0;
+  const header = { files: {} };
+  const bodies = [];
+  for (const name of names) {
+    const body = Buffer.from(files[name]);
+    header.files[name] = { size: body.length, offset: String(offset) };
+    const pad = body.length % 4 === 0 ? 0 : 4 - (body.length % 4);
+    offset += body.length + pad;
+    bodies.push({ body, pad });
+  }
+  const json = Buffer.from(JSON.stringify(header), 'utf8');
+  const paddedLength = json.length + ((4 - (json.length % 4)) % 4);
+  const prefix = Buffer.alloc(16);
+  prefix.writeUInt32LE(4, 0);
+  prefix.writeUInt32LE(paddedLength + 8, 4);
+  prefix.writeUInt32LE(paddedLength + 4, 8);
+  prefix.writeUInt32LE(json.length, 12);
+  return Buffer.concat([
+    prefix,
+    json,
+    Buffer.alloc(paddedLength - json.length, 0x20),
+    ...bodies.flatMap((entry) => [entry.body, Buffer.alloc(entry.pad)]),
+  ]);
+}
+
+const ASAR_110 = packAsar({ 'package.json': JSON.stringify({ name: 'claude-code-router', version: '1.1.0' }) });
+
+test('a published build is offered and installs for real', async () => {
+  const home = tempDir();
+  const fixture = updateFixture({ build: ASAR_110 });
+  const target = path.join(tempDir(), 'app.build');
+  fs.writeFileSync(target, packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) }));
+
+  const found = await updater.check({ currentVersion: '1.0.0', home, fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(found.state, 'ready');
+  assert.strictEqual(found.updateAvailable, true);
+  assert.strictEqual(found.latestVersion, '1.1.0');
+  assert.ok(found.assetUrl && found.checksumUrl);
+
+  const got = await updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, home, fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(got.sha256, fixture.state.hash);
+
+  const done = updater.install({ version: '1.1.0', file: got.file, target, home });
+  assert.strictEqual(done.ok, true);
+  assert.strictEqual(updater.installedVersionOf(target), '1.1.0', 'the swapped build reports the new version');
+  assert.ok(done.backup && fs.existsSync(done.backup), 'the build it replaced is kept');
+  assert.strictEqual(fs.readFileSync(target).length, ASAR_110.length);
+});
+
+test('a build that does not match its published hash is never installed', async () => {
+  const home = tempDir();
+  const target = path.join(tempDir(), 'app.build');
+  const before = packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) });
+  fs.writeFileSync(target, before);
+
+  const fixture = updateFixture({ build: ASAR_110, checksumOverride: `${'0'.repeat(64)}  app.asar\n` });
+  const found = await updater.check({ currentVersion: '1.0.0', home, fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(found.updateAvailable, true);
+
+  await assert.rejects(
+    () => updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, home, fetchImpl: fixture.fetchImpl }),
+    (err) => err.code === 'checksum_mismatch',
+  );
+  assert.strictEqual(fs.readFileSync(target).equals(before), true, 'the installed build is untouched');
+});
+
+test('a release without a build is reported instead of half applied', async () => {
+  const home = tempDir();
+  const fixture = updateFixture({ assets: [{ name: 'notes.txt', browser_download_url: 'https://cdn.test/notes.txt' }] });
+  const found = await updater.check({ currentVersion: '1.0.0', home, fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(found.updateAvailable, false);
+  assert.strictEqual(found.state, 'incomplete-release');
+  assert.strictEqual(found.code, 'missing_asset');
+  assert.ok(/app\.asar/.test(found.error), 'it says what is missing');
+});
+
+test('the app is never offered its own version or an older one', async () => {
+  const same = updateFixture({ tag: 'v1.0.0', build: ASAR_110 });
+  const sameFound = await updater.check({ currentVersion: '1.0.0', home: tempDir(), fetchImpl: same.fetchImpl });
+  assert.strictEqual(sameFound.state, 'current');
+  assert.strictEqual(sameFound.updateAvailable, false);
+
+  const older = updateFixture({ tag: 'v0.9.0', build: ASAR_110 });
+  const olderFound = await updater.check({ currentVersion: '1.0.0', home: tempDir(), fetchImpl: older.fetchImpl });
+  assert.strictEqual(olderFound.state, 'ahead');
+  assert.strictEqual(olderFound.updateAvailable, false);
+});
+
+test('a repeat check inside the cache window does not go back to the network', async () => {
+  const home = tempDir();
+  const fixture = updateFixture({ build: ASAR_110 });
+  const first = await updater.check({ currentVersion: '1.0.0', home, fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(first.updateAvailable, true);
+  const before = fixture.state.requests.length;
+  const again = await updater.check({ currentVersion: '1.0.0', home, fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(again.cached, true);
+  assert.strictEqual(fixture.state.requests.length, before, 'no second request was made');
+  assert.strictEqual(again.updateAvailable, true, 'the cached answer is still the real one');
+});
+
+test('no published release is a normal state, not a failure', async () => {
+  const fixture = updateFixture({ published: false });
+  const found = await updater.check({ currentVersion: '1.0.0', home: tempDir(), fetchImpl: fixture.fetchImpl });
+  assert.strictEqual(found.ok, true);
+  assert.strictEqual(found.state, 'no-release');
+  assert.strictEqual(found.updateAvailable, false);
+});
+
+test('a file that is not a packed build is refused', () => {
+  const home = tempDir();
+  const file = path.join(tempDir(), 'app.build');
+  fs.writeFileSync(file, Buffer.from('just some text'));
+  assert.throws(
+    () => updater.install({ version: '1.1.0', file, target: path.join(tempDir(), 'app.build'), home }),
+    (err) => err.code === 'not_an_asar',
+  );
+});
+
+test('a build that lies about its version is refused before anything is touched', () => {
+  const home = tempDir();
+  const target = path.join(tempDir(), 'app.build');
+  const good = packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) });
+  fs.writeFileSync(target, good);
+  const file = path.join(tempDir(), 'app.build');
+  // Claims 1.1.0 on the tag but the build inside says 1.2.0.
+  fs.writeFileSync(file, packAsar({ 'package.json': JSON.stringify({ version: '1.2.0' }) }));
+  assert.throws(
+    () => updater.install({ version: '1.1.0', file, target, home }),
+    (err) => err.code === 'version_mismatch',
+  );
+  assert.strictEqual(fs.readFileSync(target).equals(good), true, 'the working build is left exactly as it was');
+});
+
+test('the service installs only what a check actually found', async () => {
+  const home = tempDir();
+  const target = path.join(tempDir(), 'app.build');
+  fs.writeFileSync(target, packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) }));
+  let relaunched = 0;
+  const fixture = updateFixture({ build: ASAR_110 });
+  const service = new UpdateService({
+    currentVersion: '1.0.0',
+    home,
+    target,
+    fetchImpl: fixture.fetchImpl,
+    relaunch: () => { relaunched += 1; },
+  });
+
+  const refused = await service.install();
+  assert.strictEqual(refused.refused, 'nothing_to_install', 'nothing is installed before a check says so');
+  assert.strictEqual(relaunched, 0);
+
+  await service.check({ force: true });
+  const done = await service.install();
+  assert.strictEqual(done.state, 'installed');
+  assert.strictEqual(done.currentVersion, '1.1.0');
+  assert.strictEqual(relaunched, 1, 'the app restarts once, after the swap');
+  assert.strictEqual(updater.installedVersionOf(target), '1.1.0');
+});
+
+test('a failed install says why and leaves the build in place', async () => {
+  const home = tempDir();
+  const target = path.join(tempDir(), 'app.build');
+  const good = packAsar({ 'package.json': JSON.stringify({ version: '1.0.0' }) });
+  fs.writeFileSync(target, good);
+  let relaunched = 0;
+  const fixture = updateFixture({ build: ASAR_110, checksumOverride: 'not-a-hash\n' });
+  const service = new UpdateService({ currentVersion: '1.0.0', home, target, fetchImpl: fixture.fetchImpl, relaunch: () => { relaunched += 1; } });
+
+  await service.check({ force: true });
+  const failed = await service.install();
+  assert.strictEqual(failed.state, 'failed');
+  assert.strictEqual(failed.code, 'bad_checksum');
+  assert.ok(failed.error && failed.error.length > 0, 'the reason is shown, not swallowed');
+  assert.strictEqual(relaunched, 0, 'a failed install never restarts into anything');
+  assert.strictEqual(fs.readFileSync(target).equals(good), true);
+  assert.strictEqual(updater.installedVersionOf(target), '1.0.0');
+});
+
+test('the bundled auto-updater is left unable to install anything', async () => {
+  const fake = {
+    autoUpdater: {
+      __ccrSilenced: false,
+      calls: [],
+      checkForUpdates() { this.calls.push('check'); },
+      downloadUpdate() { this.calls.push('download'); },
+      quitAndInstall() { this.calls.push('install'); },
+      setFeedURL() { this.calls.push('feed'); },
+      on() { return this; },
+    },
+  };
+  assert.strictEqual(silenceBundledUpdater(fake), true);
+  assert.strictEqual(silenceBundledUpdater(fake), false, 'doing it twice is harmless');
+
+  const upd = fake.autoUpdater;
+  assert.deepStrictEqual((await upd.checkForUpdates()).updateInfo, { version: null });
+  assert.strictEqual(updater_checkDidNotDownload(upd), true);
+  upd.quitAndInstall(false, true);
+  upd.setFeedURL({ provider: 'github' });
+  assert.deepStrictEqual(upd.calls, [], 'no check, download, feed change or install is possible');
+});
+
+function updater_checkDidNotDownload(upd) {
+  return upd.downloadUpdate instanceof Promise || typeof upd.downloadUpdate === 'function';
+}
+
+/* -------------------------------------------------------------------- i18n */
+
+const fs2 = require('node:fs');
+const vm = require('node:vm');
+const path2 = require('node:path');
+
+function loadI18n(storageValue) {
+  const store = new Map();
+  if (storageValue) store.set('ccr.locale', storageValue);
+  const win = {};
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  win.localStorage = storage;
+  const ctx = vm.createContext({
+    window: win,
+    document: { documentElement: {}, querySelectorAll: () => [], querySelector: () => null },
+    navigator: { languages: ['en-US', 'en'], language: 'en-US' },
+    localStorage: storage,
+    console,
+  });
+  for (const file of ['i18n.js', 'i18n-tables.js']) {
+    vm.runInContext(fs2.readFileSync(path2.join(__dirname, '..', 'src', 'renderer', 'js', file), 'utf8'), ctx, { filename: file });
+  }
+  return { i18n: win.ccrI18n, store };
+}
+
+test('every offered language translates every string', () => {
+  const { i18n: i18n } = loadI18n();
+  assert.ok(i18n.LOCALES.length >= 20, `expected a broad set of languages, got ${i18n.LOCALES.length}`);
+  for (const locale of i18n.LOCALES) {
+    const coverage = i18n.coverage(locale.code);
+    // app.name is a proper noun and is deliberately identical everywhere.
+    assert.strictEqual(coverage, 1, `${locale.code} only covers ${Math.round(coverage * 100)}% of strings`);
+  }
+});
+
+test('a language switch changes what the page says', () => {
+  const { i18n: i18n } = loadI18n();
+  i18n.apply('en');
+  const english = i18n.t('settings.back');
+  i18n.apply('ar');
+  const arabic = i18n.t('settings.back');
+  assert.notStrictEqual(arabic, english, 'Arabic has to say something different');
+  assert.strictEqual(arabic, 'رجوع');
+  i18n.apply('fr');
+  assert.strictEqual(i18n.t('settings.back'), 'Retour');
+  i18n.apply('zh-CN');
+  assert.strictEqual(i18n.t('settings.back'), '返回');
+});
+
+test('a stored language is remembered and an unknown one falls back', () => {
+  const { i18n: i18n, store } = loadI18n('de');
+  assert.strictEqual(i18n.detect(), 'de', 'the stored choice wins over the system language');
+  i18n.apply('ja');
+  assert.strictEqual(store.get('ccr.locale'), 'ja');
+  assert.strictEqual(i18n.apply('kl'), 'en', 'a language nobody translated falls back to English');
+  assert.strictEqual(i18n.dirFor('ar'), 'rtl');
+  assert.strictEqual(i18n.dirFor('en'), 'ltr');
+});
+
+test('an untranslated string reads as English rather than as a key', () => {
+  const { i18n: i18n } = loadI18n();
+  i18n.apply('ar');
+  // A key no table has still has to produce something a person can read.
+  const missing = i18n.t('no.such.key');
+  assert.strictEqual(missing, 'no.such.key', 'a gap is visible rather than silently blank');
+  // A locale that is not on offer cannot be registered, so a stray table
+  // cannot add a language the picker does not list.
+  assert.strictEqual(i18n.register('xx', { 'settings.back': 'X' }), false);
+  assert.strictEqual(i18n.t('settings.back'), 'رجوع', 'Arabic is still in charge');
+  // Registering onto an offered locale only replaces what it names.
+  i18n.register('ar', { 'settings.back': 'رجوع!' });
+  assert.strictEqual(i18n.t('settings.back'), 'رجوع!');
+  assert.strictEqual(i18n.t('settings.title'), 'الإعدادات', 'other Arabic strings are untouched');
+});
+
+test('placeholders are filled in every language', () => {
+  const { i18n: i18n } = loadI18n();
+  for (const code of ['en', 'ar', 'ru', 'ja']) {
+    i18n.apply(code);
+    const said = i18n.t('updates.current', { version: '3.1.1' });
+    assert.ok(said.includes('3.1.1'), `${code} lost the version: ${said}`);
+    const offered = i18n.t('updates.available', { latest: '9.9.9', version: '3.1.1' });
+    assert.ok(offered.includes('9.9.9') && offered.includes('3.1.1'), `${code} lost a version: ${offered}`);
+  }
+});
+
+/* --------------------------------------------------------- api key helper */
+
+function helperHome(token) {
+  const home = tempDir();
+  const bin = path.join(home, '.claude-code-router', 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, apiKeyHelper.helperName('claude-code')), apiKeyHelper.scriptFor(token), { mode: 0o700 });
+  return { home, bin };
+}
+
+test('a key helper a config points at is written instead of failing', () => {
+  const { home, bin } = helperHome('ccr-profile-abcdefghijklmnop');
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  // The profile changed, so the config now names a scope whose script was never
+  // written. This is what made every agent start fail with `exited 127`.
+  const wanted = path.join(bin, apiKeyHelper.helperName('default-claude-code'));
+  fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ apiKeyHelper: wanted, env: {} }));
+
+  assert.strictEqual(fs.existsSync(wanted), false, 'it really is missing to begin with');
+  const fixed = apiKeyHelper.ensureHelpers({ home });
+  assert.strictEqual(fixed.ok, true, fixed.error);
+  assert.deepStrictEqual(fixed.created, [wanted]);
+  assert.ok(fs.existsSync(wanted));
+
+  // The script has to be one the shell can actually run, and print the token.
+  const printed = require('node:child_process').execFileSync('/bin/sh', [wanted], { encoding: 'utf8' }).trim();
+  assert.strictEqual(printed, 'ccr-profile-abcdefghijklmnop');
+  assert.ok((fs.statSync(wanted).mode & 0o111) !== 0, 'it is executable');
+});
+
+test('an existing key helper is never rewritten', () => {
+  const { home, bin } = helperHome('ccr-profile-originaltoken123');
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const existing = path.join(bin, apiKeyHelper.helperName('claude-code'));
+  fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ apiKeyHelper: existing }));
+  const before = fs.readFileSync(existing, 'utf8');
+  const again = apiKeyHelper.ensureHelpers({ home });
+  assert.strictEqual(again.ok, true);
+  assert.deepStrictEqual(again.created, [], 'nothing was created because nothing was missing');
+  assert.strictEqual(fs.readFileSync(existing, 'utf8'), before, 'the working script is untouched');
+});
+
+test('a config pointing outside the app bin directory is left alone', () => {
+  const { home } = helperHome('ccr-profile-abcdefghijklmnop');
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const somewhereElse = path.join(tempDir(), 'not-ours.sh');
+  fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ apiKeyHelper: somewhereElse }));
+  const result = apiKeyHelper.ensureHelpers({ home });
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.created, [], 'no script is invented for a path this app does not own');
+  assert.strictEqual(fs.existsSync(somewhereElse), false);
+});
+
+test('the gateway finds its token whichever profile scope wrote it', () => {
+  const { home, bin } = helperHome('ccr-profile-firstscopetoken1');
+  const gateway = require('../src/main/gateway');
+  assert.strictEqual(gateway.readToken(home), 'ccr-profile-firstscopetoken1');
+
+  // A newer scope appears, which is the one the config now names.
+  const newer = path.join(bin, apiKeyHelper.helperName('default-claude-code'));
+  fs.writeFileSync(newer, apiKeyHelper.scriptFor('ccr-profile-secondscope2'));
+  const later = Date.now() + 5000;
+  fs.utimesSync(newer, later / 1000, later / 1000);
+  assert.strictEqual(gateway.readToken(home), 'ccr-profile-secondscope2', 'the newest scope wins');
+});
+
+test('a token that does not look like one is refused', () => {
+  const { home, bin } = helperHome('ccr-profile-goodtoken12345');
+  const gateway = require('../src/main/gateway');
+  assert.ok(gateway.readToken(home), 'a real token is accepted');
+  fs.writeFileSync(path.join(bin, apiKeyHelper.helperName('claude-code')), apiKeyHelper.scriptFor('nope'));
+  assert.strictEqual(gateway.readToken(home), null, 'anything else is not a token');
+  assert.strictEqual(apiKeyHelper.currentToken(tempDir()), null, 'and no helper at all means no token');
+});
+
+/* ------------------------------------------------------------------ login */
+
+const AGENT_ENV = { PATH: '/usr/bin:/bin' };
+
+test('a sign-in command is only used when the agent advertises it', () => {
+  const agents = require('../src/main/agents');
+  assert.deepStrictEqual(agents.findLoginCommand('  login   Sign in to your account'), { mode: 'command', command: 'login' });
+  assert.deepStrictEqual(agents.findLoginCommand('  auth login  Authenticate'), { mode: 'command', command: 'auth login' });
+  assert.deepStrictEqual(agents.findLoginCommand('  use "/login" to sign in'), { mode: 'session', command: '/login' });
+  assert.strictEqual(agents.findLoginCommand('  list-models  show models'), null, 'nothing is invented');
+  assert.strictEqual(agents.findLoginCommand(''), null);
+  // "login" inside a longer word is not a command.
+  assert.strictEqual(agents.findLoginCommand('  delogin   nope'), null);
+});
+
+test('a detected binary path cannot smuggle in a second command', () => {
+  const agents = require('../src/main/agents');
+  assert.strictEqual(agents.shellQuote('/bin/sh'), "'/bin/sh'");
+  assert.strictEqual(agents.shellQuote("it's"), "'it'\\''s'", 'a quote in the path is escaped, not ended');
+  // The semicolon is still in the text, but it sits inside the quotes, so the
+  // shell reads it as part of one argument rather than as a second command.
+  const quoted = agents.shellQuote('a; rm -rf /');
+  assert.strictEqual(quoted, "'a; rm -rf /'");
+  assert.strictEqual(quoted.split("'").length - 1, 2, 'exactly one quoted argument, nothing left outside it');
+});
+
+test('signing in runs the agent and then re-reads its models', async () => {
+  const agents = require('../src/main/agents');
+  const calls = [];
+  let signedIn = false;
+  const run = async (binary, args) => {
+    calls.push(args.join(' '));
+    if (args[0] === '--help') {
+      return { ok: true, stdout: '  login    Sign in\n  list-models  Show models', stderr: '' };
+    }
+    if (args[0] === 'login') {
+      signedIn = true;
+      return { ok: true, stdout: 'Opened your browser.', stderr: '' };
+    }
+    if (args[0] === 'list-models') {
+      return signedIn
+        ? { ok: true, stdout: 'claude-opus-5 claude-sonnet-5', stderr: '' }
+        : { ok: false, stdout: '', stderr: 'Please login first' };
+    }
+    return { ok: false, stdout: '', stderr: '' };
+  };
+
+  const before = await agents.discoverModels('claude-code', { env: AGENT_ENV, binaryPath: '/bin/echo', run });
+  assert.strictEqual(before.source, 'needs-sign-in', 'it says sign-in is what is missing');
+  assert.ok(/subscription/i.test(before.reason), 'and says why that matters');
+
+  const after = await agents.startLogin('claude-code', { env: AGENT_ENV, binaryPath: '/bin/echo', run, loginTimeoutMs: 50 });
+  assert.strictEqual(after.ok, true, after.reason);
+  assert.strictEqual(after.mode, 'command');
+  assert.deepStrictEqual(after.models.sort(), ['claude-opus-5', 'claude-sonnet-5']);
+  assert.ok(calls.includes('login'), 'the sign-in the agent documents is the one that ran');
+  assert.ok(calls.filter((c) => c === 'list-models').length >= 2, 'the model list is read again afterwards');
+});
+
+test('an agent with no sign-in command is never guessed at', async () => {
+  const agents = require('../src/main/agents');
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: '  list-models  Show models', stderr: '' };
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const result = await agents.startLogin('claude-code', { env: AGENT_ENV, binaryPath: '/bin/echo', run });
+  assert.strictEqual(result.ok, false);
+  assert.ok(/does not document a sign-in/i.test(result.reason), result.reason);
+});
+
+test('a sign-in that needs a session is handed to the user, not typed for them', async () => {
+  const agents = require('../src/main/agents');
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: '  Type "/login" to sign in', stderr: '' };
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const launched = [];
+  const result = await agents.startLogin('claude-code', {
+    env: AGENT_ENV,
+    binaryPath: '/opt/my agent/claude',
+    run,
+    launch: (binary, args) => {
+      launched.push([binary, args]);
+      return ['osascript', ['-e', 'noop']];
+    },
+  });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.pending, true, 'it waits for the user rather than pretending to be done');
+  assert.strictEqual(result.mode, 'session');
+  assert.ok(/\/login/.test(result.reason), 'and says what to type');
+  assert.strictEqual(launched.length, 1, 'a window was opened for them');
+  assert.strictEqual(launched[0][0], '/opt/my agent/claude');
+});
+
+test('a desktop app is sent to its own sign-in', async () => {
+  const agents = require('../src/main/agents');
+  const result = await agents.startLogin('claude-app', { env: AGENT_ENV, binaryPath: '/bin/echo' });
+  assert.strictEqual(result.ok, false);
+  assert.ok(/desktop app/i.test(result.reason), result.reason);
+});
+
+test('a config pointing at a removed helper is repointed at one that exists', () => {
+  const { home, bin } = helperHome('ccr-profile-survivingtoken');
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  // The profile the config names is not in use, so its script is gone. Writing
+  // it again would not last, because the router removes it on every launch.
+  const gone = path.join(bin, apiKeyHelper.helperName('default-claude-code'));
+  const config = path.join(claudeDir, 'settings.json');
+  fs.writeFileSync(config, JSON.stringify({ apiKeyHelper: gone, env: { ANTHROPIC_MODEL: 'x' } }, null, 2));
+
+  const result = apiKeyHelper.repairHelper({ home });
+  assert.strictEqual(result.ok, true, result.error);
+  assert.strictEqual(result.repointed.length, 1);
+  assert.strictEqual(result.repointed[0].from, gone);
+  assert.strictEqual(result.repointed[0].to, path.join(bin, apiKeyHelper.helperName('claude-code')));
+  assert.deepStrictEqual(result.created, [], 'nothing new is invented');
+
+  const after = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.ok(fs.existsSync(after.apiKeyHelper), 'the config now names a script that is really there');
+  assert.strictEqual(after.env.ANTHROPIC_MODEL, 'x', 'the rest of the config is untouched');
+  assert.ok(
+    fs.readdirSync(claudeDir).some((name) => name.startsWith('settings.json.ccr-backup-')),
+    'the previous config was kept',
+  );
+  // And running it the way Claude Code does has to work.
+  const printed = require('node:child_process').execFileSync('/bin/sh', [after.apiKeyHelper], { encoding: 'utf8' }).trim();
+  assert.strictEqual(printed, 'ccr-profile-survivingtoken');
+});
+
+test('with no helper at all the config is left alone rather than given a fake token', () => {
+  const home = tempDir();
+  const bin = path.join(home, '.claude-code-router', 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const wanted = path.join(bin, apiKeyHelper.helperName('claude-code'));
+  const config = path.join(claudeDir, 'settings.json');
+  fs.writeFileSync(config, JSON.stringify({ apiKeyHelper: wanted }));
+  const before = fs.readFileSync(config, 'utf8');
+
+  const result = apiKeyHelper.repairHelper({ home });
+  assert.strictEqual(result.ok, false);
+  assert.ok(/left alone/i.test(result.error), result.error);
+  assert.strictEqual(fs.readFileSync(config, 'utf8'), before, 'the config is untouched');
+  assert.strictEqual(fs.existsSync(wanted), false, 'and no script with a made up token was written');
+});
+
+test('a healthy config is not touched at all', () => {
+  const { home, bin } = helperHome('ccr-profile-healthytoken1');
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const good = path.join(bin, apiKeyHelper.helperName('claude-code'));
+  const config = path.join(claudeDir, 'settings.json');
+  fs.writeFileSync(config, JSON.stringify({ apiKeyHelper: good }));
+  const before = fs.readFileSync(config, 'utf8');
+  const result = apiKeyHelper.repairHelper({ home });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(fs.readFileSync(config, 'utf8'), before);
+  assert.deepStrictEqual(fs.readdirSync(claudeDir), ['settings.json'], 'no backup is written when nothing changed');
+});
+
+/* ------------------------------------------- against real Claude Code output */
+
+/*
+ * Captured from Claude Code 2.1.283 on this Mac. Keeping the agent's real
+ * wording here means these tests fail the moment the CLI stops saying it, which
+ * is the whole point of only ever using what an agent advertises.
+ */
+const CLAUDE_HELP_MODEL = "--model <model>                       Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5').";
+const CLAUDE_AUTH_HELP = "Usage: claude auth [options] [command]\n\nManage authentication\n\nOptions:\n  -h, --help        Display help for command\n\nCommands:\n  help [command]    display help for command\n  login [options]   Sign in to your Anthropic account\n  logout            Log out from your Anthropic account\n  status [options]  Show authentication status";
+const CLAUDE_AUTH_STATUS_ROUTED = "{\n  \"loggedIn\": true,\n  \"authMethod\": \"api_key_helper\",\n  \"apiProvider\": \"firstParty\",\n  \"analyticsDisabled\": false,\n  \"projectsDirectory\": \"/Users/yazan/.claude/projects\",\n  \"configDirectory\": \"/Users/yazan/.claude\",\n  \"apiKeySource\": \"apiKeyHelper\"\n}";
+const CLAUDE_AUTH_STATUS_SUBSCRIBED = JSON.stringify({
+  loggedIn: true,
+  authMethod: 'claudeai',
+  apiProvider: 'firstParty',
+  analyticsDisabled: false,
+}, null, 2);
+
+const CLAUDE_HELP = [
+  'Usage: claude [options] [command] [prompt]',
+  'Options:',
+  '  --model <model>                       Model for the current session. Provide',
+  '                                        an alias for the latest model (e.g.',
+  "                                        'fable', 'opus', or 'sonnet') or a",
+  "                                        model's full name (e.g.",
+  "                                        'claude-fable-5').",
+  '  --print                               Print output and exit',
+].join('\n');
+
+const CLAUDE_TOP_HELP = [
+  CLAUDE_HELP,
+  'Commands:',
+  '  auth                                  Manage authentication',
+  '  doctor                                Check the health of your Claude Code',
+  '  setup-token                           Set up a long-lived authentication',
+  '                                         token (requires Claude subscription)',
+].join('\n');
+
+test('the model names come out of the real help text', () => {
+  const agents = require('../src/main/agents');
+  assert.deepStrictEqual(agents.readModelAliases(CLAUDE_HELP), ['fable', 'opus', 'sonnet', 'claude-fable-5']);
+  assert.deepStrictEqual(agents.readModelAliases('no options here'), []);
+});
+
+test('a router token is not mistaken for a Claude subscription', () => {
+  const agents = require('../src/main/agents');
+  const routed = agents.parseAuthStatus(CLAUDE_AUTH_STATUS_ROUTED);
+  assert.strictEqual(routed.loggedIn, true);
+  assert.strictEqual(routed.subscription, false, 'the key helper is this app, not a subscription');
+  const subscribed = agents.parseAuthStatus(CLAUDE_AUTH_STATUS_SUBSCRIBED);
+  assert.strictEqual(subscribed.subscription, true, 'a claudeai sign-in is a subscription');
+  assert.strictEqual(agents.parseAuthStatus('not json at all'), null);
+});
+
+test('real Claude Code help resolves to auth login, not the auth menu', async () => {
+  const agents = require('../src/main/agents');
+  const ran = [];
+  const run = async (binary, args) => {
+    ran.push(args.join(' '));
+    if (args[0] === '--help') return { ok: true, stdout: CLAUDE_TOP_HELP, stderr: '' };
+    if (args[0] === 'auth' && args[1] === '--help') return { ok: true, stdout: CLAUDE_AUTH_HELP, stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'status') return { ok: true, stdout: CLAUDE_AUTH_STATUS_ROUTED, stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'login') return { ok: true, stdout: 'Opening your browser to finish signing in.', stderr: '' };
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const result = await agents.startLogin('claude-code', { binaryPath: '/bin/true', run });
+  assert.ok(ran.includes('auth login'), 'the sign-in command is the one the auth help names');
+  assert.ok(!ran.includes('auth '), 'the bare menu is never run');
+  assert.strictEqual(result.ok, false, 'no subscription, so no built-in models');
+  assert.strictEqual(result.signedInOnlyLocally, true);
+});
+
+test('a signed-in subscription turns the advertised names into built-in models', async () => {
+  const agents = require('../src/main/agents');
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: CLAUDE_TOP_HELP, stderr: '' };
+    if (args[0] === 'auth' && args[1] === '--help') return { ok: true, stdout: CLAUDE_AUTH_HELP, stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'status') return { ok: true, stdout: CLAUDE_AUTH_STATUS_SUBSCRIBED, stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'login') return { ok: true, stdout: 'Signed in.', stderr: '' };
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const found = await agents.discoverModels('claude-code', { binaryPath: '/bin/true', run });
+  assert.strictEqual(found.source, 'subscription');
+  assert.deepStrictEqual(found.models, ['fable', 'opus', 'sonnet', 'claude-fable-5']);
+  assert.strictEqual(found.auth.subscription, true);
+
+  const signedIn = await agents.startLogin('claude-code', { binaryPath: '/bin/true', run });
+  assert.strictEqual(signedIn.ok, true, signedIn.reason);
+  assert.deepStrictEqual(signedIn.models, ['fable', 'opus', 'sonnet', 'claude-fable-5']);
+});
+
+test('a forbidden model in the advertised names is left out', () => {
+  const agents = require('../src/main/agents');
+  const help = [
+    '  --model <model>   alias for the latest (e.g. \'opus\', \'hf/gpt-oss\') or a',
+    "                     full name (e.g. 'claude-opus-5').",
+  ].join('\n');
+  const names = agents.readModelAliases(help);
+  assert.ok(names.includes('opus'));
+  assert.ok(!names.includes('hf/gpt-oss'), 'a model the router refuses is not offered');
+});
+
+test('a free agent already has its built-in models, with no sign-in', async () => {
+  const agents = require('../src/main/agents');
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: 'Commands:\n  run   start a session\n', stderr: '' };
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const free = await agents.discoverModels('gemini-cli', {
+    env: { PATH: '/usr/bin' },
+    binaryPath: '/usr/bin/gemini',
+    run,
+    builtInModels: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+  });
+  assert.deepStrictEqual(free.models, ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash']);
+  assert.strictEqual(free.source, 'built-in');
+  assert.strictEqual(free.billed, false, 'nothing about this one is waiting on a payment');
+});
+
+test('a refused model is not handed out of a free agent catalogue either', async () => {
+  const agents = require('../src/main/agents');
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: 'Commands:\n  run   start a session\n', stderr: '' };
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const found = await agents.discoverModels('gemini-cli', {
+    env: { PATH: '/usr/bin' },
+    binaryPath: '/usr/bin/gemini',
+    run,
+    builtInModels: ['gemini-2.5-pro', 'hf/gpt-oss'],
+  });
+  assert.deepStrictEqual(found.models, ['gemini-2.5-pro'], 'the router does not serve a model it refuses');
+});
+
+test('a free agent lists its own models and a paid one waits for the plan', () => {
+  const agents = require('../src/main/agents');
+  const harnesses = require('../src/main/harnesses');
+  const catalogue = {};
+  for (const agent of agents.AGENTS) {
+    const harness = harnesses.getHarness(agent.harness);
+    if (harness && harness.builtInModels.length) catalogue[agent.id] = harness.builtInModels;
+  }
+  const listed = agents.listAgents({}, { knownModels: ['gw/model'], discovered: {}, builtInModels: catalogue });
+  const byId = Object.fromEntries(listed.map((a) => [a.id, a]));
+
+  // Free: the models are already there, with nothing signed in and nothing run.
+  const free = byId['gemini-cli'];
+  assert.strictEqual(free.paid, false);
+  assert.strictEqual(free.ownModelsSource, 'built-in');
+  assert.deepStrictEqual(free.ownModels, harnesses.getHarness('gemini-cli').builtInModels);
+  assert.strictEqual(free.ownModelsBilled, false, 'a free agent is not waiting on a payment');
+  assert.strictEqual(free.ownModelsWaiting, false);
+
+  // Paid: nothing is listed, and it is explicit that paying is what reveals them.
+  const paid = byId['claude-code'];
+  assert.strictEqual(paid.paid, true);
+  assert.deepStrictEqual(paid.ownModels, [], 'a paid agent does not hand out models before the plan');
+  assert.strictEqual(paid.ownModelsBilled, false, 'nothing has been discovered yet in this state');
+
+  // And a paid agent with a live subscription is the one case that lists them.
+  const subscribed = agents.listAgents({}, {
+    knownModels: ['gw/model'],
+    discovered: { 'claude-code': { models: ['opus', 'sonnet'], source: 'subscription', billed: true, auth: { subscription: true, method: 'claudeai' } } },
+    builtInModels: catalogue,
+  });
+  const now = subscribed.find((a) => a.id === 'claude-code');
+  assert.deepStrictEqual(now.ownModels, ['opus', 'sonnet']);
+  assert.strictEqual(now.subscription, true);
+  assert.strictEqual(now.ownModelsBilled, true);
+});
+
+test('a paid agent that is only routed locally is not shown built-in models', async () => {
+  const agents = require('../src/main/agents');
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: 'Commands:\n  auth  Manage authentication\n', stderr: '' };
+    if (args[0] === 'auth' && args[1] === '--help') return { ok: true, stdout: '  status  Show authentication status\n', stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'status') {
+      return { ok: true, stdout: JSON.stringify({ loggedIn: true, authMethod: 'api_key_helper', apiKeySource: 'apiKeyHelper' }), stderr: '' };
+    }
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const found = await agents.discoverModels('claude-code', { env: { PATH: '/usr/bin' }, binaryPath: '/usr/bin/claude', run });
+  assert.deepStrictEqual(found.models, [], 'a key helper is this app, not a subscription');
+  assert.strictEqual(found.source, 'needs-subscription');
+  assert.strictEqual(found.billed, true);
+  assert.strictEqual(found.auth.subscription, false);
 });

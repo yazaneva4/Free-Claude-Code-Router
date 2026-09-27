@@ -1,8 +1,9 @@
 'use strict';
 
-const { randomToken } = require('./crypto');
+const { randomToken, encryptPortable, decryptPortable } = require('./crypto');
 
 const VAULT_FILE = 'vault.json';
+const WIRE_VERSION = 1;
 const SCHEMA_VERSION = 1;
 
 class VaultError extends Error {
@@ -109,6 +110,79 @@ class Vault {
     }
     this.save({ ...data, credentials: next });
     return { deleted: true, providerId };
+  }
+
+  /**
+   * The whole credential set for one account, as plaintext. Only ever held in
+   * memory, and only ever encrypted before it leaves the device.
+   */
+    exportPlaintext(accountId) {
+    return this.load()
+      .credentials.filter((c) => c.accountId === accountId)
+      .map((c) => ({
+        providerId: c.providerId,
+        label: c.label,
+        baseUrl: c.baseUrl || null,
+        accountRef: c.accountRef || null,
+        secret: c.secret ? this.crypto.decrypt(c.secret) : null,
+        updatedAt: c.updatedAt,
+      }))
+      .filter((entry) => entry.secret);
+  }
+
+  /** Seals the credential set with the password-derived key, ready to be sent. */
+    exportEnvelope(accountId, key, { email, sentAt = null } = {}) {
+    const entries = this.exportPlaintext(accountId);
+    return {
+      version: WIRE_VERSION,
+      handle: require('./crypto').accountHandle(email),
+      updatedAt: sentAt || new Date(this.now()).toISOString(),
+      credentials: encryptPortable(key, JSON.stringify(entries)),
+      count: entries.length,
+    };
+  }
+
+  /** Opens an envelope from another device and stores what is inside locally. */
+    importEnvelope(accountId, key, envelope) {
+    if (!envelope || typeof envelope !== 'object') {
+      throw new VaultError('invalid_envelope', 'The synced credentials could not be read.');
+    }
+    if (envelope.version !== WIRE_VERSION || typeof envelope.credentials !== 'string') {
+      throw new VaultError('invalid_envelope', 'Those synced credentials were written by a different version of this app.');
+    }
+    let entries;
+    try {
+      entries = JSON.parse(decryptPortable(key, envelope.credentials));
+    } catch {
+      throw new VaultError(
+        'wrong_password',
+        'Those synced credentials could not be opened. They are sealed with the password of the account that saved them.',
+      );
+    }
+    if (!Array.isArray(entries)) throw new VaultError('invalid_envelope', 'Those synced credentials are not a list.');
+
+    const stamp = this.now();
+    let imported = 0;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (!entry.providerId || typeof entry.secret !== 'string' || !entry.secret) continue;
+      // A refused provider is never imported, whatever the envelope claims.
+      let providerId;
+      try {
+        providerId = require('./providers').assertSupportedProvider(entry.providerId).id;
+      } catch {
+        continue;
+      }
+      this.set(accountId, {
+        providerId,
+        secret: entry.secret,
+        label: typeof entry.label === 'string' ? entry.label.slice(0, 60) : providerId,
+        baseUrl: typeof entry.baseUrl === 'string' ? entry.baseUrl : null,
+        accountRef: typeof entry.accountRef === 'string' ? entry.accountRef : null,
+      });
+      imported += 1;
+    }
+    return { imported, offered: entries.length, at: new Date(stamp).toISOString() };
   }
 
   deleteAllForAccount(accountId) {

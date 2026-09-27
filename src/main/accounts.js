@@ -9,6 +9,8 @@ const {
   emailProblem,
   normalizeEmail,
   randomToken,
+  deriveVaultSalt,
+  deriveVaultKey,
 } = require('./crypto');
 
 const ACCOUNTS_FILE = 'accounts.json';
@@ -106,6 +108,7 @@ class AccountService {
       email: normalized,
       displayName: name,
       password: hashPassword(password),
+      vaultSalt: deriveVaultSalt(normalized),
       storageMode,
       sync: { endpoint: null, lastSyncedAt: null },
       createdAt: this.now(),
@@ -114,7 +117,7 @@ class AccountService {
     };
     data.accounts.push(account);
     this.save(data);
-    return this.startSession(account);
+    return this.startSession(account, password);
   }
 
   login({ email, password }) {
@@ -126,21 +129,47 @@ class AccountService {
     const data = this.load();
     const stored = data.accounts.find((a) => a.id === account.id);
     stored.lastLoginAt = this.now();
+    if (!stored.vaultSalt) stored.vaultSalt = deriveVaultSalt(stored.email);
     this.save(data);
-    return this.startSession(stored);
+    return this.startSession(stored, password);
   }
 
-  startSession(account) {
+  startSession(account, password = null) {
     const token = randomToken(32);
     const issuedAt = this.now();
-    this.store.write(SESSION_FILE, {
+    const record = {
       version: SCHEMA_VERSION,
       accountId: account.id,
       token: this.crypto.encrypt(token),
       createdAt: issuedAt,
       expiresAt: issuedAt + SESSION_TTL_MS,
-    });
+    };
+    // The key that seals credentials for the account's other devices. It is
+    // kept under the same device encryption as the session token, so signing in
+    // once is enough and the password is never asked for again.
+    if (password && account.vaultSalt) {
+      try {
+        record.vaultKey = this.crypto.encrypt(deriveVaultKey(password, account.vaultSalt).toString('base64'));
+      } catch {}
+    }
+    this.store.write(SESSION_FILE, record);
     return { account: publicAccount(account), expiresAt: issuedAt + SESSION_TTL_MS };
+  }
+
+  /**
+   * The sealed-credential key for the signed-in account, or null when this
+   * device cannot produce one. Only the account that owns it can derive it.
+   */
+  vaultKey() {
+    const active = this.session();
+    if (!active) return null;
+    const raw = this.store.read(SESSION_FILE, null);
+    if (!raw || !raw.vaultKey) return null;
+    try {
+      return Buffer.from(this.crypto.decrypt(raw.vaultKey), 'base64');
+    } catch {
+      return null;
+    }
   }
 
   session() {

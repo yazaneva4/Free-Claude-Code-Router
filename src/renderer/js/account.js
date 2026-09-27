@@ -3,10 +3,11 @@
 const api = window.gate;
 const state = { boot: null, harnesses: [] };
 
+const t = (key, vars) => window.ccrI18n.t(key, vars);
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-const VIEWS = ['#view-auth', '#view-sync', '#view-harness', '#view-account'];
+const VIEWS = ['#view-auth', '#view-sync', '#view-harness', '#view-settings'];
 const STEP_VIEWS = { sync: '#view-sync', harnesses: '#view-harness' };
 const STEP_NUMBERS = { '#view-auth': 1, '#view-sync': 2, '#view-harness': 3 };
 
@@ -37,8 +38,9 @@ function showView(selector) {
     marker.classList.toggle('is-active', Number(marker.dataset.progress) === step);
   }
   document.body.classList.toggle('no-scroll', selector === '#view-auth');
-  document.title = step ? `Claude Code Router — Step ${step} of 3` : 'Claude Code Router — Account';
+  document.title = step ? `Claude Code Router — ${step}/3` : t('app.name');
   if (selector === '#view-harness') renderHarnesses();
+  if (selector === '#view-settings') openSettings();
 }
 
 function renderHarnesses() {
@@ -57,7 +59,7 @@ function renderHarnesses() {
 
     const badge = document.createElement('span');
     badge.className = `badge ${harness.billing === 'free' ? 'ok' : 'busy'}`;
-    badge.textContent = harness.billing === 'free' ? 'No payment' : 'Payment required';
+    badge.textContent = t(harness.billing === 'free' ? 'harness.billing.free' : 'harness.billing.paid');
 
     head.append(title, badge);
 
@@ -72,14 +74,14 @@ function renderHarnesses() {
     box.name = 'enabled';
     box.checked = Boolean(harness.enabled);
     const toggleText = document.createElement('span');
-    toggleText.textContent = 'Enable for this device';
+    toggleText.textContent = t('harness.enable');
     toggle.append(box, toggleText);
 
     card.append(head, note, toggle);
 
     if (harness.builtInModels.length) {
       const label = document.createElement('label');
-      label.textContent = 'Built-in model';
+      label.textContent = t('harness.builtInModel');
       const select = document.createElement('select');
       select.name = 'model';
       for (const model of harness.builtInModels) {
@@ -94,7 +96,7 @@ function renderHarnesses() {
     } else {
       const routed = document.createElement('p');
       routed.className = 'hint';
-      routed.textContent = 'No built-in models: requests are routed to the providers you configure.';
+      routed.textContent = t('harness.noBuiltIn');
       card.append(routed);
     }
 
@@ -115,21 +117,21 @@ function harnessSelections() {
   return selections;
 }
 
-function encryptionNote() {
-  return state.boot && state.boot.encryptionBackend === 'os-keychain'
-    ? 'Secrets on this account are encrypted with the macOS keychain.'
-    : 'Secrets on this account are encrypted with a key stored on this device only.';
+async function openSettings(tab) {
+  if (!window.ccrSettings) return;
+  try {
+    await window.ccrSettings.open(state.boot, tab);
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
-function fillAccountView() {
-  const account = state.boot.account;
-  $('#account-email').textContent = account ? account.email : '';
-  const form = $('#form-profile');
-  form.displayName.value = (account && account.displayName) || '';
-  form.storageMode.value = (account && account.storageMode) || 'device';
-  form.syncEndpoint.value = (account && account.syncEndpoint) || '';
-  $('#encryption-note').textContent = encryptionNote();
-}
+window.ccrGate = {
+  onSignedOut() {
+    state.boot = { signedIn: false };
+    showView('#view-auth');
+  },
+};
 
 async function afterAuth() {
   state.boot = await api.auth.bootstrap();
@@ -144,16 +146,15 @@ async function afterAuth() {
 async function openRouter() {
   const result = await api.reveal();
   if (!result.revealed) {
-    toast(`The router did not open: ${result.reason}`, true);
+    toast(window.ccrI18n.t('toast.routerDidNotOpen', { reason: result.reason || '' }), true);
     if (state.boot && state.boot.signedIn) {
-      fillAccountView();
-      showView('#view-account');
+      showView('#view-settings');
     } else {
       showView('#view-auth');
     }
     return;
   }
-  toast('Signed in');
+  toast(window.ccrI18n.t('toast.signedIn'));
 }
 
 async function refresh(showHash) {
@@ -163,9 +164,12 @@ async function refresh(showHash) {
     showView('#view-auth');
     return;
   }
+  if (showHash === 'settings' || location.hash === '#settings') {
+    showView('#view-settings');
+    return;
+  }
   if (showHash === 'account' || location.hash === '#account') {
-    fillAccountView();
-    showView('#view-account');
+    showView('#view-settings');
     return;
   }
   if (!state.boot.onboarding.complete) {
@@ -183,8 +187,8 @@ function wireAuth() {
       $('#form-login').hidden = signup;
       $('#form-signup').hidden = !signup;
       $('#gate-subtitle').textContent = signup
-        ? 'Create an account to use your router. Guest access is not available.'
-        : 'Sign in to open your router. Guest access is not available.';
+        ? t('auth.subtitle.signup')
+        : t('auth.subtitle.login');
     });
   }
 
@@ -211,7 +215,7 @@ function wireAuth() {
         password: form.password.value,
         storageMode: 'device',
       });
-      toast('Account created');
+      toast(t('toast.accountCreated'));
       await afterAuth();
     } catch (err) {
       setError(form, err.message);
@@ -259,70 +263,13 @@ function wireHarness() {
   });
 }
 
-function wireAccount() {
-  $('#btn-back-router').addEventListener('click', async () => {
-    await openRouter();
-  });
-
-  $('#btn-logout').addEventListener('click', async () => {
-    await api.auth.logout();
-    state.boot = await api.auth.bootstrap();
-    showView('#view-auth');
-    toast('Signed out');
-  });
-
-  $('#form-profile').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    setError(form, '');
-    try {
-      const result = await api.account.updateProfile({
-        displayName: form.displayName.value,
-        storageMode: form.storageMode.value,
-        syncEndpoint: form.syncEndpoint.value.trim(),
-      });
-      state.boot = { ...state.boot, account: result.account };
-      fillAccountView();
-      toast('Profile saved');
-    } catch (err) {
-      setError(form, err.message);
-    }
-  });
-
-  $('#form-password').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    setError(form, '');
-    try {
-      await api.account.changePassword({
-        currentPassword: form.currentPassword.value,
-        newPassword: form.newPassword.value,
-      });
-      form.reset();
-      toast('Password replaced');
-    } catch (err) {
-      setError(form, err.message);
-    }
-  });
-
-  $('#btn-delete-account').addEventListener('click', async () => {
-    if (!confirm('Delete this account and its stored secrets on this device?')) return;
-    try {
-      await api.account.remove();
-      state.boot = await api.auth.bootstrap();
-      showView('#view-auth');
-      toast('Account deleted');
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
 document.addEventListener('DOMContentLoaded', async () => {
   wireAuth();
   wireSync();
   wireHarness();
-  wireAccount();
+  // A stored language is applied before anything is painted, so the first frame
+  // is already in the right language rather than flashing English.
+  window.ccrI18n.apply(window.ccrI18n.detect());
   try {
     await refresh();
   } catch (err) {

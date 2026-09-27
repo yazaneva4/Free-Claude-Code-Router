@@ -1,11 +1,14 @@
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --panel-2: #1e222b;
-  --line: #2a2f3a;
-  --text: #e8eaf0;
-  --muted: #98a0b3;
-  --accent: #5b8cff;
+  --bg: #0b1020;
+  --panel: rgba(22, 28, 52, 0.58);
+  --panel-2: rgba(255, 255, 255, 0.07);
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #eef2ff;
+  --muted: rgba(233, 238, 255, 0.68);
+  --accent: #7aa2ff;
+  --glass-blur: 24px;
+  --glass-sheen: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 18px 48px -18px rgba(3, 6, 18, 0.85);
   --ok: #3ecf8e;
   --warn: #f0b429;
   --err: #ff6b6b;
@@ -21,9 +24,68 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: radial-gradient(58rem 42rem at 8% -8%, rgba(96, 128, 255, 0.34), transparent 62%),
+    radial-gradient(46rem 38rem at 96% 4%, rgba(168, 108, 255, 0.28), transparent 60%),
+    radial-gradient(52rem 44rem at 50% 108%, rgba(64, 214, 214, 0.2), transparent 62%),
+    linear-gradient(180deg, #0b1020 0%, #0a0f1d 52%, #080c17 100%);
+  background-attachment: fixed;
   color: var(--text);
+}
+
+/* The glass: translucent, blurred, with light catching the top edge. */
+.glass,
+.auth-card,
+.card,
+.topbar,
+.tabs,
+.toast {
+  background-color: var(--panel);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--line);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-sheen);
+}
+
+.tab,
+.nav-btn.is-active,
+input,
+select,
+.ghost,
+.danger-btn {
+  background-color: var(--panel-2);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid var(--line);
+}
+
+.tab,
+.nav-btn,
+input,
+select,
+.primary,
+.ghost,
+.danger-btn {
+  transition: transform 120ms ease, box-shadow 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.tab:active,
+.nav-btn:active,
+.primary:active,
+.ghost:active,
+.danger-btn:active {
+  transform: scale(0.985);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(233, 238, 255, 0.45);
+}
+
+::selection {
+  background: rgba(122, 162, 255, 0.35);
 }
 
 h1 {
@@ -427,4 +489,148 @@ label.choice em {
   align-items: center;
   gap: 8px;
   color: var(--text);
+}
+
+/* ------------------------------------------------------------------ settings */
+
+.settings-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background-color: rgba(14, 19, 38, 0.55);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-sheen);
+}
+
+.settings-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.glass-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background-color: rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 120ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.glass-chip:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 6px 18px -10px rgba(3, 6, 18, 0.9);
+}
+
+.glass-chip:active {
+  transform: scale(0.97);
+}
+
+.settings-tabs {
+  position: sticky;
+  top: 74px;
+  z-index: 4;
+  padding: 6px;
+  margin-bottom: 16px;
+  background-color: rgba(14, 19, 38, 0.5);
+  backdrop-filter: blur(var(--glass-blur)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(170%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
+  max-width: 780px;
+}
+
+.settings-panel .card,
+.settings-panel form {
+  background-color: rgba(20, 26, 48, 0.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(175%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(175%);
+  border: 1px solid var(--line);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-sheen);
+}
+
+.settings-panel .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-panel .card .row button,
+.settings-panel form .row button {
+  flex: 1 1 180px;
+}
+
+.agent,
+.provider {
+  display: grid;
+  gap: 8px;
+}
+
+.agent .card,
+.provider .card {
+  margin: 0;
+}
+
+.notes {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  margin: 0;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  background-color: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+}
+
+#language-select option {
+  color: #0b1020;
+}
+
+/* Right to left: the back arrow points the other way and the flow mirrors. */
+html[dir='rtl'] .settings-bar,
+html[dir='rtl'] .row {
+  flex-direction: row-reverse;
+}
+
+html[dir='rtl'] .btn-back-arrow,
+html[dir='rtl'] #btn-settings-back span[aria-hidden] {
+  transform: scaleX(-1);
+  display: inline-block;
+}
+
+html[dir='rtl'] .danger-zone {
+  border-color: rgba(255, 122, 122, 0.4);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .settings-bar,
+  .settings-tabs,
+  .settings-panel .card,
+  .settings-panel form,
+  .glass-chip {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: #141a30 !important;
+  }
 }
