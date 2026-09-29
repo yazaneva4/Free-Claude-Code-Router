@@ -6,7 +6,16 @@ const path = require('node:path');
 
 const RELEASES_URL = 'https://api.github.com/repos/yazaneva4/Free-Claude-Code-Router/releases/latest';
 const CHECK_TIMEOUT_MS = 10000;
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * How long a check answer is reused before GitHub is asked again.
+ *
+ * This has to stay shorter than the interval the update service ticks on, or
+ * every tick is answered from this cache and the app goes hours without
+ * noticing a release while looking like it is checking. At fifteen minutes
+ * against a thirty minute tick, each tick is a real check, which is four
+ * requests an hour to the release API.
+ */
+const CACHE_TTL_MS = 15 * 60 * 1000;
 const STATE_FILE = 'update-check.json';
 const BUILD_ASSET = 'app.asar';
 const CHECKSUM_ASSET = 'app.asar.sha256';
@@ -84,7 +93,7 @@ async function fetchLatest({ fetchImpl = fetch, url = RELEASES_URL, timeoutMs = 
 
 async function check({ currentVersion, home = os.homedir(), force = false, fetchImpl = fetch, now = Date.now() } = {}) {
   const previous = readState(home);
-  const fresh = previous.checkedAt && now - Date.parse(previous.checkedAt) < CHECK_INTERVAL_MS;
+  const fresh = previous.checkedAt && now - Date.parse(previous.checkedAt) < CACHE_TTL_MS;
   if (!force && fresh && previous.currentVersion === currentVersion) return { ...previous, cached: true };
 
   const latest = await fetchLatest({ fetchImpl });
@@ -126,7 +135,7 @@ async function check({ currentVersion, home = os.homedir(), force = false, fetch
 
 module.exports = {
   RELEASES_URL,
-  CHECK_INTERVAL_MS,
+  CACHE_TTL_MS,
   STATE_FILE,
   BUILD_ASSET,
   CHECKSUM_ASSET,

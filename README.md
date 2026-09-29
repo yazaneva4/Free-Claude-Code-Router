@@ -75,6 +75,11 @@ zip of the whole app for a manual install.
 The version has to be higher than the one already published, and higher than the
 one in `package.json`, or the app will not offer it as an update.
 
+Once published, a signed-in device finds it within about half an hour: the app
+checks every 30 minutes and caches an answer for 15, so every tick is a real
+check. A closed device finds it at next launch. It is never installed without
+you pressing Install in Settings.
+
 ## What is in here
 
 ```

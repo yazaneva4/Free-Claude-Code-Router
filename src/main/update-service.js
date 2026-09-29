@@ -22,6 +22,10 @@ const TARGET = process.env.CCR_APP_ASAR
  * Long enough not to chatter at the release API, short enough that a session
  * left open over a few days still hears about a release without needing a
  * relaunch. A device that is closed simply checks the next time it starts.
+ *
+ * The cached answer from the last check has to expire before this fires, or
+ * every tick is answered from disk and nothing is ever asked again. That
+ * relationship is asserted in the tests rather than left to a comment.
  */
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 

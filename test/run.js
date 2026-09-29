@@ -1893,3 +1893,58 @@ test('a check already in progress is not started a second time', async () => {
   await first;
   assert.strictEqual(service.snapshot().busy, false, 'and the service settles afterwards');
 });
+
+test('a tick is never answered entirely from the cache', async () => {
+  const { UpdateService, CHECK_INTERVAL_MS } = require('../src/main/update-service');
+  const { CACHE_TTL_MS } = require('../src/main/updates');
+  // The relationship is the whole point: if the answer is cached for longer
+  // than the gap between ticks, every tick reads a file and nothing is ever
+  // asked again, while the app looks like it is checking.
+  assert.ok(
+    CACHE_TTL_MS < CHECK_INTERVAL_MS,
+    `the cache (${CACHE_TTL_MS}ms) must expire before the next tick (${CHECK_INTERVAL_MS}ms)`,
+  );
+  assert.strictEqual(CACHE_TTL_MS, 15 * 60 * 1000);
+  assert.strictEqual(CHECK_INTERVAL_MS, 30 * 60 * 1000);
+
+  const home = tempDir();
+  let asked = 0;
+  const start = Date.parse('2026-01-01T00:00:00Z');
+  const service = new UpdateService({
+    currentVersion: '3.1.1',
+    home,
+    isSignedIn: () => true,
+    fetchImpl: async () => { asked += 1; return { ok: false, status: 404, json: async () => ({}) }; },
+  });
+
+  const seen = [];
+  for (let i = 1; i <= 4; i += 1) {
+    service.now = start + i * CHECK_INTERVAL_MS;
+    const r = await service.tick();
+    seen.push(r.cached === true);
+  }
+  assert.strictEqual(asked, 4, 'each tick went to the network, not to a cached answer');
+  assert.ok(seen.every((cached) => cached === false), 'no tick was served from the cache');
+});
+
+test('a second check inside the cache window is still answered locally', async () => {
+  const home = tempDir();
+  let asked = 0;
+  const { CACHE_TTL_MS } = require('../src/main/updates');
+  const start = Date.parse('2026-01-01T00:00:00Z');
+  const fetchImpl = async () => { asked += 1; return { ok: false, status: 404, json: async () => ({}) }; };
+
+  const first = await updater.check({ currentVersion: '1.0.0', home, force: true, fetchImpl, now: start });
+  assert.strictEqual(first.ok, true);
+  assert.strictEqual(asked, 1);
+
+  // Well inside the window: answered from disk, no request.
+  const cached = await updater.check({ currentVersion: '1.0.0', home, fetchImpl, now: start + CACHE_TTL_MS - 1000 });
+  assert.strictEqual(cached.cached, true);
+  assert.strictEqual(asked, 1, 'nothing was asked a second time');
+
+  // Past it: asked again.
+  const refreshed = await updater.check({ currentVersion: '1.0.0', home, fetchImpl, now: start + CACHE_TTL_MS + 1000 });
+  assert.notStrictEqual(refreshed.cached, true);
+  assert.strictEqual(asked, 2, 'the cache expired and the answer was fetched again');
+});

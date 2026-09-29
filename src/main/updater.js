@@ -119,6 +119,9 @@ async function check({ currentVersion, home = os.homedir(), force = false, fetch
       latestVersion: null,
       notes: described.notes,
       releaseUrl: described.releaseUrl,
+      // Carried through like every other branch, so a caller can tell a real
+      // answer from one replayed out of the cache.
+      cached: Boolean(found.cached),
       checkedAt: new Date(now).toISOString(),
     };
   }

@@ -302,9 +302,12 @@ async function runSelfTest({ app, window: win, lockApp, showAccountPage, logFile
       document.querySelector('#settings-tabs .tab[data-tab="agents"]').click();
       const pick = () => Array.from(document.querySelectorAll('#agent-list [data-agent]'));
       // Listing the agents also asks each one what models it offers, which
-      // shells out, so the list is polled rather than read after a fixed pause.
+      // shells out to the real CLI a few times over, so the list is polled
+      // rather than read after a fixed pause. The window is generous on purpose:
+      // when this machine is busy a single probe can take several seconds, and a
+      // test that fails on load stops telling anyone anything.
       const began = Date.now();
-      while (Date.now() - began < 25000 && !pick().length) {
+      while (Date.now() - began < 60000 && !pick().length) {
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
       const cards = pick();
