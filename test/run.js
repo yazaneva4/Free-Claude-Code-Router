@@ -1948,3 +1948,53 @@ test('a second check inside the cache window is still answered locally', async (
   assert.notStrictEqual(refreshed.cached, true);
   assert.strictEqual(asked, 2, 'the cache expired and the answer was fetched again');
 });
+
+test('every provider is offered, and DeepSeek among them', () => {
+  const providers = require('../src/main/providers');
+  const catalog = providers.catalog();
+  const all = [...catalog.local, ...catalog.cloud];
+  assert.ok(all.length >= 10, `expected a full catalogue, got ${all.length}`);
+  const byId = Object.fromEntries(all.map((p) => [p.id, p]));
+  assert.ok(byId.deepseek, 'DeepSeek is one of the providers');
+  assert.strictEqual(byId.deepseek.name, 'DeepSeek');
+  assert.strictEqual(byId.deepseek.baseUrl, 'https://api.deepseek.com/v1');
+  assert.strictEqual(byId.deepseek.requiresCredential, true);
+  assert.ok(byId.deepseek.credentialLabel, 'it says which key it wants');
+  for (const provider of all) {
+    assert.ok(provider.id && provider.name, 'a provider is named');
+    assert.ok(/^https?:\/\//.test(provider.baseUrl), `${provider.id} has a real endpoint`);
+    assert.ok(Array.isArray(provider.supportedApis) && provider.supportedApis.length, `${provider.id} declares an api`);
+    if (provider.requiresCredential) {
+      assert.ok(provider.credentialLabel, `${provider.id} asks for a key by name`);
+    }
+  }
+});
+
+test('no models on offer means only automatic is accepted', () => {
+  const { validateModel } = require('../src/main/agents');
+  // The gateway being down produces an empty list, which used to be read as
+  // "no information" and let any name through.
+  assert.strictEqual(validateModel('auto', []), 'auto');
+  assert.throws(() => validateModel('openai/gpt-4o-mini', []), (err) => err.code === 'unknown_model' && /No models are on offer/.test(err.message));
+  // A list that does contain the model still accepts it.
+  assert.strictEqual(validateModel('openai/gpt-4o-mini', ['openai/gpt-4o-mini']), 'openai/gpt-4o-mini');
+  // No list at all still means "cannot check", which the save path relies on.
+  assert.strictEqual(validateModel('openai/gpt-4o-mini', undefined), 'openai/gpt-4o-mini');
+  // A refused model is refused whatever the list says.
+  assert.throws(() => validateModel('hf/gpt-oss', []), (err) => err.code === 'forbidden_model');
+});
+
+test('an agent can be taken away and put back', async () => {
+  const agents = require('../src/main/agents');
+  const settings = { agents: { profiles: {} } };
+  const first = agents.addProfile(settings, 'claude-code', {}, { knownModels: [] });
+  assert.strictEqual(first['claude-code'].enabled, true);
+  const gone = agents.removeProfile(first, 'claude-code');
+  assert.strictEqual(gone['claude-code'], undefined);
+  // Removing is not retiring it: it goes back in exactly as it was.
+  const again = agents.addProfile(gone, 'claude-code', {}, { knownModels: [] });
+  assert.strictEqual(again['claude-code'].enabled, true);
+  assert.strictEqual(again['claude-code'].model, 'auto');
+  // And doing it twice is harmless.
+  assert.strictEqual(agents.removeProfile(agents.removeProfile(again, 'claude-code'), 'claude-code')['claude-code'], undefined);
+});

@@ -340,6 +340,57 @@ async function runSelfTest({ app, window: win, lockApp, showAccountPage, logFile
     })()`, true);
     record(results, logFile, { name: 'settings lists the agents and one can be added and removed', ok: agents && agents.ok, detail: agents && !agents.ok ? `${agents.reason} (${agents.count || 0} listed)` : '' });
 
+    // Removing a profile must not retire the agent: it has to be addable again.
+    const readd = await win.webContents.executeJavaScript(`(async () => {
+      const pick = () => Array.from(document.querySelectorAll('#agent-list [data-agent]'));
+      const id = ${JSON.stringify(agents && agents.id ? agents.id : 'claude-code')};
+      const card = () => pick().find((node) => node.dataset.agent === id);
+      const waitFor = async (want) => {
+        const begin = Date.now();
+        for (;;) {
+          const node = card();
+          const button = node && node.querySelector('[data-role=add], [data-role=remove]');
+          if (button && button.dataset.role === want) return true;
+          if (Date.now() - begin > 15000) return false;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      };
+      // Add it, take it away, then put it back the way a person would.
+      if (await waitFor('add')) card().querySelector('[data-role=add]').click();
+      if (!await waitFor('remove')) return { ok: false, reason: 'it could not be added the first time' };
+      card().querySelector('[data-role=remove]').click();
+      if (!await waitFor('add')) return { ok: false, reason: 'removing it did not bring the add button back' };
+      card().querySelector('[data-role=add]').click();
+      const back = await waitFor('remove');
+      if (!back) return { ok: false, reason: 'it could not be added a second time' };
+      card().querySelector('[data-role=remove]').click();
+      return { ok: await waitFor('add'), reason: 'it could not be left clean', id };
+    })()`, true);
+    record(results, logFile, { name: 'an agent can be added again after being removed', ok: readd && readd.ok, detail: readd && !readd.ok ? `${readd.reason}` : '' });
+
+    // The providers panel has to actually list the providers, DeepSeek included,
+    // because a provider that is defined but never drawn is one you cannot use.
+    const providers = await win.webContents.executeJavaScript(`(async () => {
+      document.querySelector('#settings-tabs .tab[data-tab="providers"]').click();
+      const cards = () => Array.from(document.querySelectorAll('#provider-list [data-provider]'));
+      const began = Date.now();
+      while (Date.now() - began < 15000 && !cards().length) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      const listed = cards().map((card) => card.dataset.provider);
+      return { listed, empty: document.querySelector('[data-panel="providers"]').innerText.replace(/\\s+/g, ' ').trim().slice(0, 120) };
+    })()`, true);
+    record(results, logFile, {
+      name: 'the providers panel lists the providers',
+      ok: Boolean(providers && providers.listed.length >= 8),
+      detail: providers ? `${providers.listed.length} shown: ${providers.listed.join(', ')}` : 'nothing rendered',
+    });
+    record(results, logFile, {
+      name: 'DeepSeek is offered as a provider',
+      ok: Boolean(providers && providers.listed.includes('deepseek')),
+      detail: providers && !providers.listed.includes('deepseek') ? `not in: ${providers.listed.join(', ')}` : '',
+    });
+
     await showAccountPage('#settings');
     await waitFor(win, `!document.querySelector('#view-settings').hidden`, 20000);
 

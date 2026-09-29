@@ -495,12 +495,29 @@ function listAgents(settings, options = {}) {
   return AGENTS.map((agent) => publicAgent(agent, settings, { ...options, discovered: (options.discovered || {})[agent.id] }));
 }
 
+/**
+ * Checks a model name against what the router can actually use.
+ *
+ * An empty list is treated as "nothing is on offer", not as "no information":
+ * when the gateway is down the list comes back empty, and treating that as a
+ * blank cheque let any plausible looking name be written into a profile. Only
+ * 'auto' survives that, which is the right answer anyway, since 'auto' means
+ * the router picks whatever is working. Passing no list at all still skips the
+ * check, for the paths that genuinely have nothing to compare against.
+ */
 function validateModel(model, knownModels) {
   const value = String(model == null ? 'auto' : model).trim();
   if (!value || value === 'auto') return 'auto';
   if (isForbiddenModelId(value)) throw badRequest('forbidden_model', `${value} is not a model this router will use.`);
-  if (Array.isArray(knownModels) && knownModels.length && !knownModels.includes(value)) {
-    throw badRequest('unknown_model', `${value} is not a model the gateway offers.`);
+  if (Array.isArray(knownModels)) {
+    if (!knownModels.includes(value)) {
+      throw badRequest(
+        'unknown_model',
+        knownModels.length
+          ? `${value} is not a model the gateway offers.`
+          : `No models are on offer right now, so ${value} cannot be used yet. Leave it on automatic, or check again once the gateway is answering.`,
+      );
+    }
   }
   return value;
 }
