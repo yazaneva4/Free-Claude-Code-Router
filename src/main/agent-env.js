@@ -10,9 +10,24 @@ const DEFAULT_BIN_DIRS = [
   path.join('.bun', 'bin'),
   path.join('.npm-global', 'bin'),
   path.join('.volta', 'bin'),
+  // Where npm puts its shims on Windows, which is where the agent CLIs land
+  // there when they are installed the ordinary way.
+  path.join('AppData', 'Roaming', 'npm'),
+  path.join('scoop', 'shims'),
 ];
 
-const SYSTEM_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+// The homebrew, local, usr and bin directories do not exist on Windows, and
+// Node lives somewhere else entirely, so the Windows locations are listed too.
+// They cost nothing where they are absent because a missing directory is
+// skipped, and without them a Windows install would never find claude or codex.
+const SYSTEM_BIN_DIRS = [
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+  '/usr/bin',
+  '/bin',
+  'C:\\Program Files\\nodejs',
+  'C:\\ProgramData\\chocolatey\\bin',
+];
 
 function candidateDirs(home) {
   return [

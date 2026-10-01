@@ -883,25 +883,43 @@ test('signing in again is what lets this device share keys', () => {
 });
 
 test('the harnesses can find the agent CLIs the shell installed', () => {
-  const home = '/Users/someone';
-  const env = { PATH: '/usr/bin:/bin' };
-  const present = new Set(['/usr/bin', '/bin', `${home}/.local/bin`]);
-  const result = agentEnv.ensureAgentPath(env, home, (dir) => present.has(dir));
-  assert.deepStrictEqual(result.added, [`${home}/.local/bin`], 'only real directories are added');
-  assert.strictEqual(env.PATH.split(path.delimiter)[0], `${home}/.local/bin`, 'the agent bin dir comes first');
-  assert.ok(env.PATH.endsWith('/usr/bin:/bin'), 'the inherited PATH is preserved');
+  // Built from this platform's separator and delimiter rather than written out
+  // as posix strings. A colon is only the delimiter on macOS and Linux, so the
+  // original form asserted something false on Windows and failed there.
+  const home = path.join(path.sep, 'Users', 'someone');
+  const agentBin = path.join(home, '.local', 'bin');
+  const usrBin = path.join(path.sep, 'usr', 'bin');
+  const rootBin = path.join(path.sep, 'bin');
+  const inherited = [usrBin, rootBin].join(path.delimiter);
 
-  const alreadyThere = { PATH: `${home}/.local/bin:/usr/bin` };
+  const env = { PATH: inherited };
+  const present = new Set([usrBin, rootBin, agentBin]);
+  const result = agentEnv.ensureAgentPath(env, home, (dir) => present.has(dir));
+  assert.deepStrictEqual(result.added, [agentBin], 'only real directories are added');
+  assert.strictEqual(env.PATH.split(path.delimiter)[0], agentBin, 'the agent bin dir comes first');
+  assert.ok(env.PATH.endsWith(inherited), 'the inherited PATH is preserved');
+
+  const alreadyThere = { PATH: [agentBin, usrBin].join(path.delimiter) };
   const second = agentEnv.ensureAgentPath(alreadyThere, home, () => true);
-  assert.ok(!second.added.includes(`${home}/.local/bin`), 'a directory already on the PATH is not added again');
+  assert.ok(!second.added.includes(agentBin), 'a directory already on the PATH is not added again');
   const entries = alreadyThere.PATH.split(path.delimiter);
-  assert.strictEqual(entries.filter((dir) => dir === `${home}/.local/bin`).length, 1, 'no duplicate entry');
-  assert.ok(alreadyThere.PATH.endsWith(`${home}/.local/bin:/usr/bin`), 'the inherited entries keep their order');
+  assert.strictEqual(entries.filter((dir) => dir === agentBin).length, 1, 'no duplicate entry');
+  assert.ok(alreadyThere.PATH.endsWith([agentBin, usrBin].join(path.delimiter)), 'the inherited entries keep their order');
 
   const empty = { PATH: '' };
   agentEnv.ensureAgentPath(empty, home, () => false);
   assert.strictEqual(empty.PATH, '', 'a PATH is never invented when no directory exists');
-  assert.ok(agentEnv.candidateDirs(home).includes(`${home}/.local/bin`));
+  assert.ok(agentEnv.candidateDirs(home).includes(agentBin));
+});
+
+test('the agent CLIs are looked for where Windows keeps them', () => {
+  // The homebrew and usr directories do not exist on Windows, so without these
+  // a Windows install would find no agent at all.
+  const dirs = agentEnv.candidateDirs(path.join(path.sep, 'Users', 'someone'));
+  assert.ok(dirs.includes(path.join('C:\\Program Files\\nodejs')), 'Node is looked for where Windows installs it');
+  assert.ok(dirs.includes('C:\\ProgramData\\chocolatey\\bin'), 'and chocolatey too');
+  assert.ok(dirs.some((dir) => dir.endsWith(path.join('AppData', 'Roaming', 'npm'))), 'npm shims are looked for');
+  assert.ok(dirs.some((dir) => dir.endsWith(path.join('scoop', 'shims'))), 'and scoop shims');
 });
 
 test('closing the window does not take the gateway down with it', () => {
