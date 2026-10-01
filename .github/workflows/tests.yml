@@ -61,6 +61,8 @@ jobs:
       # removed once the cause is found.
       - name: TEMPORARY publish diagnostics
         if: failure()
+        # Windows defaults to PowerShell, which does not read this script.
+        shell: bash
         run: |
           mkdir -p diagnostics
           for step in scripts/check.js test/run.js test/ipc.js; do
