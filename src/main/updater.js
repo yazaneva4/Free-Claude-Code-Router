@@ -284,9 +284,24 @@ function packedVersionOf(buffer) {
   }
 }
 
-function run(command, args) {
-  const { execFileSync } = require('node:child_process');
-  execFileSync(command, args, { stdio: 'ignore' });
+/**
+ * Copies and renames files with the archive layer switched off.
+ *
+ * Electron patches `fs` so that any path containing ".asar" is opened as an
+ * archive rather than as a file. That is right for the running app and wrong
+ * here, where the build is being moved as plain bytes. Setting the flag works,
+ * unlike the usual `if ('noAsar' in process)` guard, which never fires because
+ * Electron does not define the property up front. This replaces shelling out
+ * to /bin/cp and /bin/mv, which only ever worked on macOS and Linux.
+ */
+function withPlainFs(fn) {
+  const prior = process.noAsar;
+  process.noAsar = true;
+  try {
+    return fn();
+  } finally {
+    process.noAsar = prior;
+  }
 }
 
 /**
@@ -319,21 +334,25 @@ function install({ version, file, target, home = os.homedir(), now = Date.now() 
 
   let hadPrevious = false;
   try {
-    run('/bin/cp', ['-p', target, backup]);
+    withPlainFs(() => fs.copyFileSync(target, backup));
     hadPrevious = true;
   } catch {
     // No previous build to keep, which only happens on a first install.
   }
 
+  // Written beside the target and renamed over it, so an interrupted install
+  // cannot leave half a build where the app expects a whole one.
   const staged = path.join(targetDir, `.ccr-update-${process.pid}${BACKUP_SUFFIX}`);
   try {
-    run('/bin/cp', [file, staged]);
-    run('/bin/chmod', ['644', staged]);
-    run('/bin/mv', ['-f', staged, target]);
+    withPlainFs(() => {
+      fs.copyFileSync(file, staged);
+      fs.chmodSync(staged, 0o644);
+      fs.renameSync(staged, target);
+    });
   } catch (err) {
-    try { fs.unlinkSync(staged); } catch {}
+    try { withPlainFs(() => fs.unlinkSync(staged)); } catch {}
     if (hadPrevious) {
-      try { run('/bin/cp', ['-p', backup, target]); } catch {}
+      try { withPlainFs(() => fs.copyFileSync(backup, target)); } catch {}
     }
     throw fail('install_failed', `The new build could not be put in place: ${err && err.message ? err.message : err}`);
   }
@@ -356,6 +375,7 @@ module.exports = {
   updateDir,
   STAGED_NAME,
   packedVersionOf,
+  withPlainFs,
   sha256,
   readChecksum,
   findAsset,

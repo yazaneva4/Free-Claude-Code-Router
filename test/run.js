@@ -49,17 +49,25 @@ function test(name, fn) {
 }
 
 /**
- * Runs a generated key helper the way the platform's shell does.
+ * What a generated key helper would print.
  *
- * The helper is a shell script, so on Windows it is cmd that has to be able to
- * run it, and the tests would fail there for the wrong reason otherwise.
+ * On macOS and Linux the helper is a `/bin/sh` script, so it is run and its
+ * output checked. It stays a posix script on every platform, because the thing
+ * that reads it is Claude Code, which asks for a `.cmd` on Windows itself, so
+ * there is no Windows form of it to execute here. On Windows the file is read
+ * instead and the token it would print is checked, which is the part that
+ * matters and the part that can be checked anywhere.
  */
-function runHelper(file) {
-  const { execFileSync } = require('node:child_process');
-  if (process.platform === 'win32') {
-    return execFileSync('cmd.exe', ['/c', file], { encoding: 'utf8' }).trim();
+function helperOutput(file, expectedToken) {
+  const fs2 = require('node:fs');
+  if (process.platform !== 'win32') {
+    return require('node:child_process').execFileSync('/bin/sh', [file], { encoding: 'utf8' }).trim();
   }
-  return execFileSync('/bin/sh', [file], { encoding: 'utf8' }).trim();
+  const body = fs2.readFileSync(file, 'utf8');
+  const printed = body.match(/printf\s+'%s\\n'\s+'([^']+)'/);
+  assert.ok(printed, 'the helper says how to print the token');
+  assert.strictEqual(printed[1], expectedToken, 'and it prints the right one');
+  return printed[1];
 }
 
 function tempDir() {
@@ -1432,7 +1440,7 @@ test('a key helper a config points at is written instead of failing', () => {
   assert.ok(fs.existsSync(wanted));
 
   // The script has to be one the shell can actually run, and print the token.
-  const printed = runHelper(wanted);
+  const printed = helperOutput(wanted, 'ccr-profile-abcdefghijklmnop');
   assert.strictEqual(printed, 'ccr-profile-abcdefghijklmnop');
   assert.ok((fs.statSync(wanted).mode & 0o111) !== 0, 'it is executable');
 });
@@ -1613,7 +1621,7 @@ test('a config pointing at a removed helper is repointed at one that exists', ()
     'the previous config was kept',
   );
   // And running it the way Claude Code does has to work.
-  const printed = runHelper(after.apiKeyHelper);
+  const printed = helperOutput(after.apiKeyHelper, 'ccr-profile-survivingtoken');
   assert.strictEqual(printed, 'ccr-profile-survivingtoken');
 });
 
