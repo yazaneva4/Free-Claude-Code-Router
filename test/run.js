@@ -1,5 +1,31 @@
 'use strict';
 
+/**
+ * A crash has to be as visible as a failed test.
+ *
+ * A failing test is caught and reported, but a crash — a require that throws
+ * before any test runs, or a rejection nobody was waiting for — kills the
+ * process with a stack trace and nothing else. Under Actions that stack trace
+ * is buried in a log nobody reads, and a platform that fails this way looks
+ * identical to one that fails for a reason. So both are turned into an
+ * annotation that appears next to the run, and the process still exits
+ * non-zero.
+ */
+function reportCrash(what, err) {
+  const message = err && err.message ? err.message : String(err);
+  console.error(`CRASH ${what}: ${message}`);
+  if (err && err.stack) console.error(err.stack);
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const flat = (text) => String(text).replace(/[%\r\n]/g, ' ');
+    const at = err && err.stack && /([\w./\\-]+\.js):(\d+):\d+/.exec(err.stack);
+    console.error(`::error ${at ? `file=${at[1]},line=${at[2]},` : ''}title=crash: ${flat(what)}::${flat(message)}`);
+  }
+  process.exit(1);
+}
+
+process.on('uncaughtException', (err) => reportCrash('uncaught exception', err));
+process.on('unhandledRejection', (err) => reportCrash('unhandled rejection', err));
+
 const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
