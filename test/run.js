@@ -33,7 +33,16 @@ function test(name, fn) {
       console.log(`ok   ${name}`);
     } else {
       failed += 1;
-      console.error(`FAIL ${name}: ${err && err.message ? err.message : err}`);
+      const why = err && err.message ? err.message : String(err);
+      console.error(`FAIL ${name}: ${why}`);
+      // Under Actions the log is the only place a failure shows, and a red line
+      // on the changed file beats hunting through a log. Percent signs and
+      // newlines are escaped because GitHub reads both as syntax, which would
+      // turn one failure into several or none.
+      if (process.env.GITHUB_ACTIONS === 'true') {
+        const at = err && err.stack && /test[\\/]run\.js:(\d+):\d+/.exec(err.stack);
+        console.error(`::error ${at ? `file=test/run.js,line=${at[1]},` : ''}title=${name.replace(/[%\r\n]/g, ' ')}::${why.replace(/[%\r\n]/g, ' ')}`);
+      }
     }
   };
   try {
