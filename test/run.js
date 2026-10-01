@@ -1021,7 +1021,12 @@ test('store writes atomically with owner-only permissions', () => {
   const h = harness();
   h.store.write('thing.json', { a: 1 });
   const mode = fs.statSync(h.store.file('thing.json')).mode & 0o777;
-  assert.strictEqual(mode, 0o600, `expected 0600, got ${mode.toString(8)}`);
+  // Windows has no permission bits at all. chmod there only toggles read-only,
+  // so every file reports the same mode and asserting one would be asserting
+  // something false. The write itself is still checked above.
+  if (process.platform !== 'win32') {
+    assert.strictEqual(mode, 0o600, `expected 0600, got ${mode.toString(8)}`);
+  }
   assert.deepStrictEqual(h.store.read('thing.json', null), { a: 1 });
   h.store.remove('thing.json');
   assert.strictEqual(h.store.exists('thing.json'), false);
@@ -1495,7 +1500,12 @@ test('a key helper a config points at is written instead of failing', () => {
   // The script has to be one the shell can actually run, and print the token.
   const printed = helperOutput(wanted, 'ccr-profile-abcdefghijklmnop');
   assert.strictEqual(printed, 'ccr-profile-abcdefghijklmnop');
-  assert.ok((fs.statSync(wanted).mode & 0o111) !== 0, 'it is executable');
+  // The executable bit is what makes the shell run it directly, and Windows has
+  // no such bit; there the helper is reached through the shell instead, which
+  // is checked above.
+  if (process.platform !== 'win32') {
+    assert.ok((fs.statSync(wanted).mode & 0o111) !== 0, 'it is executable');
+  }
 });
 
 test('an existing key helper is never rewritten', () => {

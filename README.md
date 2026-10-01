@@ -37,8 +37,16 @@ launch.
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
 | test suites in CI | pass | pass | pass |
-| full app install | **verified here** | not verified | not verified |
-| liquid glass, RTL, 20 languages | verified here | not verified | not verified |
+| `install.sh` / `install.ps1` | **verified here** | untested | untested |
+| liquid glass, RTL, 20 languages | verified here | untested | untested |
+| the `apiKeyHelper` fallback | works | works | **does not apply** |
+
+One Windows gap worth naming: the fallback that points Claude Code at a key
+helper is a `/bin/sh` script, and Windows has no such shell. Nothing is broken
+by it there, because the fallback only comes into play when there is no
+subscription login to use, and on Windows the answer is to sign in. It is not
+papered over with a `.cmd` shim, because whether Claude Code executes that
+helper through `cmd.exe` has not been checked from here.
 
 The suites run on all three platforms on every push, which is real evidence
 rather than an assumption. What has not been done is installing the app on a
