@@ -3,6 +3,7 @@
 const { badRequest, cleanBaseUrl } = require('./validators');
 const { accountHandle } = require('./crypto');
 
+const PULL_INTERVAL_MS = 60 * 1000;
 const DEBOUNCE_MS = 1500;
 const TIMEOUT_MS = 10000;
 
@@ -175,6 +176,80 @@ class SyncWorker {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Pulls on a timer so a change made on another device arrives on its own.
+   *
+   * This is the half that makes syncing real time rather than a button: the
+   * push is debounced, and nothing was ever listening for the other side, so a
+   * device only ever learned about a change when someone pressed a button.
+   */
+  startAutoPull({ pullIntervalMs = PULL_INTERVAL_MS, onChange = null } = {}) {
+    if (this.pullTimer) return this;
+    this.pullTimer = setInterval(() => {
+      if (this.pulling) return;
+      this.pulling = true;
+      this.pull()
+        .then((result) => {
+          this.lastPull = { at: new Date().toISOString(), ...(result || {}) };
+          if (result && result.applied && typeof onChange === 'function') onChange(result);
+        })
+        .catch(() => {})
+        .finally(() => {
+          this.pulling = false;
+        });
+    }, pullIntervalMs);
+    if (typeof this.pullTimer.unref === 'function') this.pullTimer.unref();
+    return this;
+  }
+
+  stopAutoPull() {
+    if (this.pullTimer) clearInterval(this.pullTimer);
+    this.pullTimer = null;
+    return this;
+  }
+
+  /** What sync has actually done, so the screen can report it rather than imply it. */
+  status_() {
+    return {
+      endpoint: this.endpoint(),
+      pendingPush: this.timers.size,
+      lastPush: this.last || null,
+      lastPull: this.lastPull || null,
+    };
+  }
+
+  /** Whether a change is waiting on the debounce timer to be sent. */
+  hasPending() {
+    return this.timers.size > 0;
+  }
+
+  /**
+   * Sends anything the debounce was still holding.
+   *
+   * The timer is unref'd so it can never hold the process open, which also
+   * means quitting inside the debounce window drops the change on the floor:
+   * the other device never hears about it. This is called while the app is on
+   * its way out so the last edit is not the one that goes missing.
+   */
+  async flush() {
+    const waiting = [...this.timers.entries()];
+    for (const [key, timer] of waiting) {
+      clearTimeout(timer);
+      this.timers.delete(key);
+    }
+    if (!waiting.length) return { ok: true, flushed: 0 };
+    const results = await Promise.all(
+      waiting.map(([key]) => this.push({ endpoint: this.endpointFor(key) }).catch((err) => ({ ok: false, error: err && err.message ? err.message : String(err) }))),
+    );
+    return { ok: results.every((r) => r && r.ok !== false), flushed: waiting.length };
+  }
+
+  /** The state key is `sync:<endpoint>`, so the endpoint comes back off it. */
+  endpointFor(key) {
+    if (!key || key === 'sync:none') return this.endpoint();
+    return key.startsWith('sync:') ? key.slice('sync:'.length) : key;
   }
 
   schedulePush(endpoint) {

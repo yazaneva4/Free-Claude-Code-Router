@@ -1998,3 +1998,91 @@ test('an agent can be taken away and put back', async () => {
   // And doing it twice is harmless.
   assert.strictEqual(agents.removeProfile(agents.removeProfile(again, 'claude-code'), 'claude-code')['claude-code'], undefined);
 });
+
+test('a real Anthropic sign-in is found even behind the router key helper', () => {
+  const agents = require('../src/main/agents');
+  const fs2 = require('node:fs');
+  const os2 = require('node:os');
+  const path2 = require('node:path');
+  const home = tempDir();
+  fs2.mkdirSync(path2.join(home, '.claude'), { recursive: true });
+  fs2.writeFileSync(
+    path2.join(home, '.claude', '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'x', expiresAt: Date.now() + 1e6 } }),
+  );
+
+  // This is what the router makes the CLI report, once the router has put its
+  // own key helper in the config. It hides the real sign-in.
+  const hidden = agents.parseAuthStatus(JSON.stringify({ loggedIn: true, authMethod: 'api_key_helper', apiKeySource: 'apiKeyHelper' }), home);
+  assert.strictEqual(hidden.reportedByCli, false, 'the CLI on its own cannot tell');
+  assert.strictEqual(hidden.subscription, true, 'but the sign-in on the machine is still found');
+
+  assert.strictEqual(agents.localSubscription(home).present, true);
+  assert.strictEqual(agents.localSubscription(tempDir()).present, false, 'no file means no subscription');
+
+  // And the models follow from it, even though the CLI reported a key helper.
+  const run = async (binary, args) => {
+    if (args[0] === '--help') return { ok: true, stdout: CLAUDE_TOP_HELP, stderr: '' };
+    if (args[0] === 'auth' && args[1] === '--help') return { ok: true, stdout: CLAUDE_AUTH_HELP, stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'status') {
+      return { ok: true, stdout: JSON.stringify({ loggedIn: true, authMethod: 'api_key_helper', apiKeySource: 'apiKeyHelper' }), stderr: '' };
+    }
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  return agents.discoverModels('claude-code', { binaryPath: '/usr/bin/claude', run, home }).then((found) => {
+    assert.strictEqual(found.source, 'subscription', 'the paid models show up');
+    assert.deepStrictEqual(found.models, ['fable', 'opus', 'sonnet', 'claude-fable-5']);
+    assert.strictEqual(found.billed, true);
+  });
+});
+
+test('a change waiting on the debounce is sent before the app quits', async () => {
+  const { SyncWorker } = require('../src/main/sync');
+  const home = tempDir();
+  const sent = [];
+  const worker = new SyncWorker({
+    settings: { get: () => ({}), save: () => ({}) },
+    resolveEndpoint: () => 'https://sync.example.com',
+    debounceMs: 60000,
+    fetchImpl: async (url, options) => {
+      sent.push({ url, method: options.method });
+      return { ok: true, status: 200, text: async () => '{}', json: async () => ({}) };
+    },
+  });
+  worker.schedulePush();
+  assert.strictEqual(worker.hasPending(), true, 'the change is sitting on the timer');
+  assert.strictEqual(sent.length, 0, 'and has not gone out yet');
+
+  const result = await worker.flush();
+  assert.strictEqual(result.flushed, 1, 'it was still waiting when the app quit');
+  assert.strictEqual(worker.hasPending(), false);
+  assert.strictEqual(sent.length, 1, 'so the last edit was sent rather than dropped');
+  assert.strictEqual(sent[0].method, 'POST');
+  worker.stopAutoPull();
+});
+
+test('flushing with nothing pending is a no-op', async () => {
+  const { SyncWorker } = require('../src/main/sync');
+  const worker = new SyncWorker({ settings: { get: () => ({}) }, resolveEndpoint: () => null, fetchImpl: async () => ({ ok: true, status: 200, text: async () => '{}' }) });
+  assert.strictEqual(worker.hasPending(), false);
+  const result = await worker.flush();
+  assert.strictEqual(result.flushed, 0);
+});
+
+test('sync reports what it actually did, not that it exists', async () => {
+  const { SyncWorker } = require('../src/main/sync');
+  const worker = new SyncWorker({
+    settings: { get: () => ({}), save: () => ({}) },
+    resolveEndpoint: () => 'https://sync.example.com',
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => '{}', json: async () => ({}) }),
+  });
+  const before = worker.status_();
+  assert.strictEqual(before.pendingPush, 0);
+  assert.strictEqual(before.lastPush, null, 'nothing has been sent yet, and it says so');
+  assert.strictEqual(before.lastPull, null);
+  await worker.push();
+  const after = worker.status_();
+  assert.ok(after.lastPush && after.lastPush.pushedAt, 'a real push is recorded when one happens');
+  assert.strictEqual(after.endpoint, 'https://sync.example.com');
+  worker.stopAutoPull();
+});

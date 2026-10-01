@@ -419,6 +419,11 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
     return sync ? sync.pullVault() : { ok: false, error: 'No sync endpoint is set.' };
   });
 
+  handle(ipcMain, 'sync:activity', () => {
+    session();
+    return sync ? sync.status_() : { endpoint: null, pendingPush: 0, lastPush: null, lastPull: null };
+  });
+
   handle(ipcMain, 'sync:state', () => {
     session();
     return { endpoint: endpoint(), last: sync ? sync.last || null : null };

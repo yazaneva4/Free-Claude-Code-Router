@@ -212,11 +212,23 @@
       source.textContent = agentSourceLabel(agent);
       card.append(head, source);
 
+      if (!agent.added) {
+        const notYet = document.createElement('p');
+        notYet.className = 'hint';
+        notYet.dataset.role = 'not-added';
+        notYet.textContent = t('agents.notInProfiles');
+        card.append(notYet);
+      }
+
       const own = agent.ownModels || [];
       const gatewayModels = agent.gatewayModels || [];
       const choices = own.length ? own : gatewayModels;
 
-      if (choices.length) {
+      // A model belongs to a profile. An agent you have not added has no
+      // profile, so offering the shared gateway list in a dropdown made every
+      // card look configured and made Claude Code look the same as anything
+      // else. Nothing to choose until it is added.
+      if (choices.length && agent.added) {
         const label = document.createElement('label');
         const caption = document.createElement('span');
         caption.textContent = own.length ? t('agents.ownModels') : t('agents.gatewayModels');

@@ -487,8 +487,27 @@ async function bootstrap() {
 
   // Look for new builds while the app is open, not only at launch.
   if (updateService) updateService.start();
+
+  // Listen for the other device, so a change made there arrives on its own.
+  if (sync) {
+    sync.startAutoPull({
+      onChange: (result) => log(`sync pulled a change from the other device${result.applied ? '' : ' (nothing new)'}`),
+    });
+  }
+
+  let flushed = false;
+  app.on('before-quit', (event) => {
+    if (flushed || !sync || !sync.hasPending()) return;
+    // A change made in the last moment is still on the debounce timer, and the
+    // timer will not survive the quit. Hold the quit just long enough to send
+    // it, so the edit before closing is the one that is never lost.
+    flushed = true;
+    event.preventDefault();
+    sync.flush().catch(() => {}).finally(() => app.quit());
+  });
   app.on('will-quit', () => {
     if (updateService) updateService.stop();
+    if (sync) sync.stopAutoPull();
   });
 
   if (SELFTEST) {

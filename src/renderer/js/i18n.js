@@ -138,6 +138,7 @@ window.ccrI18n = (() => {
     'agents.sourceFree': 'Free plan, already available.',
     'agents.sourceOwnBilled': 'From the plan you pay for.',
     'agents.sourceNeedsPlan': 'Sign in to your plan to see its models.',
+    'agents.notInProfiles': 'Not in your profiles yet. Add it to choose a model.',
     'action.addAgent': 'Add',
     'action.removeAgent': 'Remove',
     'agents.model': 'Model',

@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('gate', {
     pushVault: () => unwrap(invoke('sync:pushVault')),
     pullVault: () => unwrap(invoke('sync:pullVault')),
     state: () => unwrap(invoke('sync:state')),
+    activity: () => unwrap(invoke('sync:activity')),
   },
   reveal: () => unwrap(invoke('gate:reveal')),
 });

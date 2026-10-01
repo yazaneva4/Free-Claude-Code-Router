@@ -9,6 +9,7 @@
  */
 
 window.ccrI18n.register("ar", {
+  "agents.notInProfiles": "ليست في ملفاتك بعد. أضِفها لاختيار نموذج.",
   "agents.sourceFree": "الخطة المجانية، متاحة بالفعل.",
   "agents.sourceOwnBilled": "من الخطة التي تدفع مقابلها.",
   "agents.sourceNeedsPlan": "سجّل الدخول إلى خطتك لرؤية نماذجها.",
@@ -145,6 +146,7 @@ window.ccrI18n.register("ar", {
 'use strict';
 
 window.ccrI18n.register("fr", {
+  "agents.notInProfiles": "Pas encore dans vos profils. Ajoutez-le pour choisir un modèle.",
   "agents.sourceFree": "Offre gratuite, déjà disponible.",
   "agents.sourceOwnBilled": "Depuis la forfait que vous payez.",
   "agents.sourceNeedsPlan": "Connectez-vous à votre forfait pour voir ses modèles.",
@@ -279,6 +281,7 @@ window.ccrI18n.register("fr", {
 });
 
 window.ccrI18n.register("es", {
+  "agents.notInProfiles": "Todavía no está en tus perfiles. Añádelo para elegir un modelo.",
   "agents.sourceFree": "Plan gratuito, ya disponible.",
   "agents.sourceOwnBilled": "Del plan que pagas.",
   "agents.sourceNeedsPlan": "Inicia sesión en tu plan para ver sus modelos.",
@@ -413,6 +416,7 @@ window.ccrI18n.register("es", {
 });
 
 window.ccrI18n.register("de", {
+  "agents.notInProfiles": "Noch nicht in deinen Profilen. Füge es hinzu, um ein Modell zu wählen.",
   "agents.sourceFree": "Kostenloser Tarif, bereits verfügbar.",
   "agents.sourceOwnBilled": "Aus dem Tarif, den du bezahlst.",
   "agents.sourceNeedsPlan": "Melde dich bei deinem Tarif an, um seine Modelle zu sehen.",
@@ -549,6 +553,7 @@ window.ccrI18n.register("de", {
 'use strict';
 
 window.ccrI18n.register("it", {
+  "agents.notInProfiles": "Non è ancora nei tuoi profili. Aggiungilo per scegliere un modello.",
   "agents.sourceFree": "Piano gratuito, già disponibile.",
   "agents.sourceOwnBilled": "Dal piano che paghi.",
   "agents.sourceNeedsPlan": "Accedi al tuo piano per vederne i modelli.",
@@ -683,6 +688,7 @@ window.ccrI18n.register("it", {
 });
 
 window.ccrI18n.register("pt", {
+  "agents.notInProfiles": "Ainda não está nos seus perfis. Adicione-o para escolher um modelo.",
   "agents.sourceFree": "Plano gratuito, já disponível.",
   "agents.sourceOwnBilled": "Do plano que você paga.",
   "agents.sourceNeedsPlan": "Entre na sua conta do plano para ver os modelos dele.",
@@ -817,6 +823,7 @@ window.ccrI18n.register("pt", {
 });
 
 window.ccrI18n.register("nl", {
+  "agents.notInProfiles": "Nog niet in je profielen. Voeg het toe om een model te kiezen.",
   "agents.sourceFree": "Gratis abonnement, al beschikbaar.",
   "agents.sourceOwnBilled": "Uit het abonnement dat je betaalt.",
   "agents.sourceNeedsPlan": "Log in bij je abonnement om de modellen te zien.",
@@ -953,6 +960,7 @@ window.ccrI18n.register("nl", {
 'use strict';
 
 window.ccrI18n.register("tr", {
+  "agents.notInProfiles": "Henüz profillerinizde değil. Bir model seçmek için ekleyin.",
   "agents.sourceFree": "Ücretsiz plan, zaten kullanılabilir.",
   "agents.sourceOwnBilled": "Ödediğiniz plandan.",
   "agents.sourceNeedsPlan": "Modellerini görmek için planınıza giriş yapın.",
@@ -1087,6 +1095,7 @@ window.ccrI18n.register("tr", {
 });
 
 window.ccrI18n.register("pl", {
+  "agents.notInProfiles": "Jeszcze nie w Twoich profilach. Dodaj go, aby wybrać model.",
   "agents.sourceFree": "Plan bezpłatny, już dostępny.",
   "agents.sourceOwnBilled": "Z planu, za który płacisz.",
   "agents.sourceNeedsPlan": "Zaloguj się do swojego planu, aby zobaczyć jego modele.",
@@ -1221,6 +1230,7 @@ window.ccrI18n.register("pl", {
 });
 
 window.ccrI18n.register("ru", {
+  "agents.notInProfiles": "Ещё нет в ваших профилях. Добавьте его, чтобы выбрать модель.",
   "agents.sourceFree": "Бесплатный план, уже доступен.",
   "agents.sourceOwnBilled": "Из плана, за который вы платите.",
   "agents.sourceNeedsPlan": "Войдите в свой план, чтобы увидеть его модели.",
@@ -1355,6 +1365,7 @@ window.ccrI18n.register("ru", {
 });
 
 window.ccrI18n.register("uk", {
+  "agents.notInProfiles": "Ще немає у ваших профілях. Додайте його, щоб обрати модель.",
   "agents.sourceFree": "Безкоштовний план, уже доступний.",
   "agents.sourceOwnBilled": "З плану, за який ви платите.",
   "agents.sourceNeedsPlan": "Увійдіть у свій план, щоб побачити його моделі.",
@@ -1491,6 +1502,7 @@ window.ccrI18n.register("uk", {
 'use strict';
 
 window.ccrI18n.register("zh-CN", {
+  "agents.notInProfiles": "还不在你的配置文件中。添加后即可选择模型。",
   "agents.sourceFree": "免费套餐，已可用。",
   "agents.sourceOwnBilled": "来自你付费的套餐。",
   "agents.sourceNeedsPlan": "登录你的套餐即可看到其模型。",
@@ -1625,6 +1637,7 @@ window.ccrI18n.register("zh-CN", {
 });
 
 window.ccrI18n.register("zh-TW", {
+  "agents.notInProfiles": "還不在你的設定檔中。加入後即可選擇模型。",
   "agents.sourceFree": "免費方案，已可用。",
   "agents.sourceOwnBilled": "來自你付費的方案。",
   "agents.sourceNeedsPlan": "登入你的方案即可看到其模型。",
@@ -1759,6 +1772,7 @@ window.ccrI18n.register("zh-TW", {
 });
 
 window.ccrI18n.register("ja", {
+  "agents.notInProfiles": "まだプロファイルに追加されていません。追加するとモデルを選べます。",
   "agents.sourceFree": "無料プランですでに利用可能です。",
   "agents.sourceOwnBilled": "有料プランから提供されます。",
   "agents.sourceNeedsPlan": "プランにサインインするとモデルが表示されます。",
@@ -1895,6 +1909,7 @@ window.ccrI18n.register("ja", {
 'use strict';
 
 window.ccrI18n.register("ko", {
+  "agents.notInProfiles": "아직 프로필에 없습니다. 추가하면 모델을 고를 수 있습니다.",
   "agents.sourceFree": "무료 플랜이며 이미 사용할 수 있습니다.",
   "agents.sourceOwnBilled": "유료 플랜에서 제공됩니다.",
   "agents.sourceNeedsPlan": "플랜에 로그인하면 모델이 표시됩니다.",
@@ -2029,6 +2044,7 @@ window.ccrI18n.register("ko", {
 });
 
 window.ccrI18n.register("id", {
+  "agents.notInProfiles": "Belum ada di profil Anda. Tambahkan untuk memilih model.",
   "agents.sourceFree": "Paket gratis, sudah tersedia.",
   "agents.sourceOwnBilled": "Dari paket yang Anda bayar.",
   "agents.sourceNeedsPlan": "Masuk ke paket Anda untuk melihat modelnya.",
@@ -2163,6 +2179,7 @@ window.ccrI18n.register("id", {
 });
 
 window.ccrI18n.register("vi", {
+  "agents.notInProfiles": "Chưa có trong hồ sơ của bạn. Thêm nó để chọn mô hình.",
   "agents.sourceFree": "Gói miễn phí, đã có sẵn.",
   "agents.sourceOwnBilled": "Từ gói bạn trả tiền.",
   "agents.sourceNeedsPlan": "Đăng nhập gói của bạn để xem các mô hình của nó.",
@@ -2299,6 +2316,7 @@ window.ccrI18n.register("vi", {
 'use strict';
 
 window.ccrI18n.register("hi", {
+  "agents.notInProfiles": "अभी आपकी प्रोफ़ाइल में नहीं है। मॉडल चुनने के लिए इसे जोड़ें।",
   "agents.sourceFree": "मुफ़्त योजना, पहले से उपलब्ध।",
   "agents.sourceOwnBilled": "उस योजना से जिसका आप भुगतान करते हैं।",
   "agents.sourceNeedsPlan": "अपनी योजना में साइन इन करके उसके मॉडल देखें।",
@@ -2433,6 +2451,7 @@ window.ccrI18n.register("hi", {
 });
 
 window.ccrI18n.register("bn", {
+  "agents.notInProfiles": "এখনও আপনার প্রোফাইলে নেই। মডেল বাছতে যোগ করুন।",
   "agents.sourceFree": "বিনা মূল্যের প্ল্যান, ইতিমধ্যেই উপলব্ধ।",
   "agents.sourceOwnBilled": "আপনি যে প্ল্যানের অর্থ দেন তা থেকে।",
   "agents.sourceNeedsPlan": "এর মডেল দেখতে আপনার প্ল্যানে সাইন ইন করুন।",

@@ -368,6 +368,25 @@ async function runSelfTest({ app, window: win, lockApp, showAccountPage, logFile
     })()`, true);
     record(results, logFile, { name: 'an agent can be added again after being removed', ok: readd && readd.ok, detail: readd && !readd.ok ? `${readd.reason}` : '' });
 
+    // An agent that is not in the profiles must not look configured: no model
+    // dropdown, and it says so. Otherwise every card showed the same shared
+    // gateway list and Claude Code looked the same as anything else.
+    const notAdded = await win.webContents.executeJavaScript(`(() => {
+      const cards = Array.from(document.querySelectorAll('#agent-list [data-agent]'));
+      const card = cards.find((node) => node.querySelector('[data-role=add]'));
+      if (!card) return { ok: false, reason: 'no unadded agent was listed' };
+      return {
+        ok: !card.querySelector('[data-role=model]') && !!card.querySelector('[data-role=not-added]'),
+        reason: 'an agent with no profile still shows a model dropdown',
+        id: card.dataset.agent,
+      };
+    })()`, true);
+    record(results, logFile, {
+      name: 'an agent that is not in the profiles does not look configured',
+      ok: notAdded && notAdded.ok,
+      detail: notAdded && !notAdded.ok ? notAdded.reason : '',
+    });
+
     // The providers panel has to actually list the providers, DeepSeek included,
     // because a provider that is defined but never drawn is one you cannot use.
     const providers = await win.webContents.executeJavaScript(`(async () => {

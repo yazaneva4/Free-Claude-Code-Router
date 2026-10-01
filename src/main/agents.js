@@ -231,7 +231,7 @@ async function discoverModels(agentId, options = {}) {
      * subscription is actually signed in, and the names used are the ones its
      * help advertises.
      */
-    const status = await readAuthStatus(agent, { env, binaryPath, run, helpTimeoutMs: options.helpTimeoutMs });
+    const status = await readAuthStatus(agent, { env, binaryPath, run, helpTimeoutMs: options.helpTimeoutMs, home: options.home });
     const builtIn = Array.isArray(options.builtInModels) ? options.builtInModels.filter((m) => !isForbiddenModelId(m)) : [];
 
     if (status && status.subscription) {
@@ -380,14 +380,39 @@ async function startLogin(agentId, options = {}) {
 }
 
 /**
+ * Whether this machine holds a real Anthropic sign-in.
+ *
+ * `claude auth status` cannot answer this once the router is installed: the
+ * router puts an `apiKeyHelper` in the Claude config, and that takes precedence,
+ * so the CLI reports `api_key_helper` even after a real sign-in and the
+ * subscription's models would never appear. So the sign-in is read from the
+ * credentials the sign-in itself writes, which the router does not touch.
+ *
+ * Absence means absence: no file, no subscription, and no models claimed.
+ */
+function localSubscription(home = os.homedir()) {
+  const file = path.join(home, '.claude', '.credentials.json');
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return { present: false, method: null };
+  }
+  if (!parsed || typeof parsed !== 'object') return { present: false, method: null };
+  const oauth = Object.keys(parsed).find((key) => /oauth|claudeai/i.test(key));
+  if (!oauth) return { present: false, method: null };
+  return { present: true, method: String(oauth) };
+}
+
+/**
  * Reads the agent's own sign-in state.
  *
- * `auth status` is JSON, which is the only place an agent says whether a person
- * signed in to their account or is merely being routed through this app's key
- * helper. A router token is not a subscription, and treating it as one would
- * offer models the person cannot actually use.
+ * `auth status` is JSON, which is where an agent says whether a person is
+ * signed in or merely being routed through this app's key helper. A router
+ * token is not a subscription, and treating it as one would offer models the
+ * person cannot actually use.
  */
-function parseAuthStatus(text) {
+function parseAuthStatus(text, optionsHome = os.homedir()) {
   let parsed = null;
   try {
     parsed = JSON.parse(String(text || '').trim());
@@ -399,8 +424,19 @@ function parseAuthStatus(text) {
   const source = String(parsed.apiKeySource || parsed.api_key_source || '');
   const loggedIn = Boolean(parsed.loggedIn || parsed.logged_in);
   const routed = ROUTED_METHODS.test(method) || ROUTED_METHODS.test(source);
-  const subscribed = loggedIn && !routed && SUBSCRIPTION_METHODS.test(method || source);
-  return { loggedIn, method: method || null, source: source || null, subscription: subscribed };
+  const reported = loggedIn && !routed && SUBSCRIPTION_METHODS.test(method || source);
+  // The router's key helper hides a real sign-in from this, so the machine is
+  // asked directly. Either can say yes; only both saying no means no.
+  const local = localSubscription(optionsHome);
+  const subscription = reported || local.present;
+  return {
+    loggedIn: loggedIn || local.present,
+    method: method || local.method || null,
+    source: source || null,
+    subscription,
+    reportedByCli: reported,
+    localSignIn: local.present,
+  };
 }
 
 /**
@@ -434,13 +470,13 @@ function readModelAliases(helpText) {
  * Asks the agent who it thinks it is. Only runs when the agent advertises an
  * `auth` command, so nothing is invoked that the agent does not document.
  */
-async function readAuthStatus(agent, { env, binaryPath, run, helpTimeoutMs = HELP_TIMEOUT_MS, statusTimeoutMs = LIST_TIMEOUT_MS } = {}) {
+async function readAuthStatus(agent, { env, binaryPath, run, helpTimeoutMs = HELP_TIMEOUT_MS, statusTimeoutMs = LIST_TIMEOUT_MS, home = null } = {}) {
   const run2 = run || runCommand;
   try {
     const authHelp = await run2(binaryPath, ['auth', '--help'], { env, timeoutMs: helpTimeoutMs });
     if (!/status/i.test(`${authHelp.stdout || ''}${authHelp.stderr || ''}`)) return null;
     const status = await run2(binaryPath, AUTH_STATUS_COMMAND.split(' '), { env, timeoutMs: statusTimeoutMs });
-    return parseAuthStatus(`${status.stdout || ''}${status.stderr || ''}`);
+    return parseAuthStatus(`${status.stdout || ''}${status.stderr || ''}`, home || os.homedir());
   } catch {
     return null;
   }
@@ -571,6 +607,7 @@ module.exports = {
   discoverModels,
   findLoginCommand,
   parseAuthStatus,
+  localSubscription,
   readModelAliases,
   shellQuote,
   startLogin,
