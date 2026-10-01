@@ -30,13 +30,13 @@ jobs:
         run: node -e "console.log(process.platform, process.arch, process.version)"
 
       - name: syntax
-        run: node scripts/check.js
+        run: node scripts/run-step.js scripts/check.js
 
       - name: unit
-        run: node test/run.js
+        run: node scripts/run-step.js test/run.js
 
       - name: ipc
-        run: node test/ipc.js
+        run: node scripts/run-step.js test/ipc.js
 
       - name: secret scan
         run: |
@@ -51,4 +51,4 @@ jobs:
           echo "no credentials found"
 
       - name: the build it would install is a readable archive
-        run: node scripts/verify-pack.js
+        run: node scripts/run-step.js scripts/verify-pack.js
