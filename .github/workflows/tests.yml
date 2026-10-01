@@ -11,6 +11,9 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: write
+
     # The gate is plain Node, so the suites run everywhere. Running them on all
     # three is what actually backs the claim that this works on Linux and
     # Windows, rather than it being asserted here and hoped for.
@@ -52,3 +55,19 @@ jobs:
 
       - name: the build it would install is a readable archive
         run: node scripts/run-step.js scripts/verify-pack.js
+
+      # TEMPORARY diagnostics, so a failing platform can be read without admin
+      # rights on the log API.
+      - name: TEMPORARY publish diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p diagnostics
+          node scripts/run-step.js test/run.js > diagnostics/unit.txt 2>&1 || true
+          node scripts/run-step.js test/ipc.js > diagnostics/ipc.txt 2>&1 || true
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git checkout -B ci-diagnostics
+          git add -A diagnostics
+          git commit -q -m diagnostics || true
+          git push -q --force origin ci-diagnostics
