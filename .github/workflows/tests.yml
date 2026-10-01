@@ -11,6 +11,9 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: write
+
     # The gate is plain Node, so the suites run everywhere. Running them on all
     # three is what actually backs the claim that this works on Linux and
     # Windows, rather than it being asserted here and hoped for.
@@ -52,3 +55,20 @@ jobs:
 
       - name: the build it would install is a readable archive
         run: node scripts/run-step.js scripts/verify-pack.js
+
+      # TEMPORARY: the Windows failures cannot be read from the checks API
+      # without admin rights, so the output is published somewhere readable and
+      # removed once the cause is found.
+      - name: TEMPORARY publish diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          for step in scripts/check.js test/run.js test/ipc.js; do
+            node scripts/run-step.js "$step" > "diagnostics/${{ matrix.os }}-$(basename $step .js).txt" 2>&1 || true
+          done
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git checkout -B ci-diagnostics
+          git add -A diagnostics
+          git commit -q -m "diagnostics for ${{ matrix.os }}" || true
+          git push -q --force origin ci-diagnostics
