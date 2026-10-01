@@ -8,30 +8,52 @@ work.
 
 ## Install
 
-This repository layers on top of the router rather than replacing it, so the
-router app has to be installed once first:
+The router app is not in this repository. This project layers on top of it, so
+install it once first:
+
+| platform | what to install |
+| --- | --- |
+| macOS | `Claude-Code-Router-*.dmg` or `.zip` from the [releases](https://github.com/musistudio/claude-code-router/releases), moved to `/Applications` |
+| Linux | `Claude-Code-Router-*.AppImage` from the same page |
+| Windows | `Claude-Code-Router-*.exe` from the same page |
+
+Then, from a clone of this repository:
 
 ```sh
-open https://github.com/musistudio/claude-code-router/releases
+./install.sh                      # macOS and Linux
+powershell -ExecutionPolicy Bypass -File install.ps1   # Windows
 ```
 
-Move `Claude Code Router.app` to `/Applications`, then from a clone of this
-repository:
+Either script finds the installed app, packs this repository, and replaces one
+file inside it: `resources/app.asar`. The build it replaced is kept beside it as
+`app.asar.before-gate`. Nothing else in the app is touched, and on macOS the
+bundle is re-signed afterwards, because a bundle edited after signing will not
+launch.
+
+`./run.command --install` does the same thing on macOS and also opens the app.
+
+### What is verified where
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| test suites in CI | pass | pass | pass |
+| full app install | **verified here** | not verified | not verified |
+| liquid glass, RTL, 20 languages | verified here | not verified | not verified |
+
+The suites run on all three platforms on every push, which is real evidence
+rather than an assumption. What has not been done is installing the app on a
+Linux or Windows machine and looking at it, because this was built on a Mac.
+
+One Linux caveat worth knowing before you try: the router ships as an
+**AppImage**, which is a read-only image, so a file cannot be swapped inside it.
+`install.sh` says so plainly rather than half working. On Linux, extract the
+AppImage and run the installer against the extracted directory, or rebuild it
+with `appimagetool`.
+
+### If the app is somewhere unusual
 
 ```sh
-./run.command --install
-```
-
-That packs this repository and puts it in the installed app as
-`Contents/Resources/app.asar`, re-signs the bundle so macOS will launch it, and
-opens it.
-
-If the app lives somewhere else, set `CCR_APP_PATH` to the `.app` bundle.
-
-Check what you have at any time:
-
-```sh
-./run.command --status
+CCR_APP_PATH=/somewhere/Claude\ Code\ Router.app ./install.sh
 ```
 
 ## Everyday commands
@@ -120,4 +142,11 @@ framework, which is why the test suite runs in CI without the app.
 
 Syntax, unit, IPC and in-app tests, against a throwaway account in a temporary
 directory. The in-app tests drive the real window, so they need the app
-installed. The first three run in CI on every push, using stock Node.
+installed, and they are macOS only. The first three run in CI on every push, on
+macOS, Linux and Windows, using stock Node:
+
+```sh
+node scripts/check.js
+node test/run.js
+node test/ipc.js
+```

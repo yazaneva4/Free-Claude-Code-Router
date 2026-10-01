@@ -8,8 +8,16 @@ const { pathToFileURL } = require('node:url');
 const electron = require('electron');
 const { app, Menu, ipcMain, safeStorage, shell } = electron;
 
-const CCR_APP = process.env.CCR_APP_PATH || '/Applications/Claude Code Router.app';
-const CCR_RESOURCES = path.join(CCR_APP, 'Contents/Resources');
+/*
+ * Inside the app, `process.resourcesPath` is where its own bundle lives on every
+ * platform: Contents/Resources on macOS, resources on Windows and Linux. Asking
+ * for it is what makes this portable; the fixed path below is only a fallback
+ * for when this runs outside a packaged app, such as the test suite.
+ */
+const CCR_RESOURCES = process.env.CCR_RESOURCES_PATH
+  || (process.resourcesPath && process.type !== 'node' ? process.resourcesPath : null)
+  || path.join(process.env.CCR_APP_PATH || '/Applications/Claude Code Router.app', 'Contents/Resources');
+const CCR_APP = process.env.CCR_APP_PATH || path.join(path.dirname(CCR_RESOURCES), '..');
 const ORIGINAL_ASAR = path.join(CCR_RESOURCES, 'app-original.asar');
 const INSTALLED_ASAR = path.join(CCR_RESOURCES, 'app.asar');
 const ROUTER_ASAR = fs.existsSync(ORIGINAL_ASAR) ? ORIGINAL_ASAR : INSTALLED_ASAR;

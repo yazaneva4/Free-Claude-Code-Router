@@ -48,6 +48,20 @@ function test(name, fn) {
   }
 }
 
+/**
+ * Runs a generated key helper the way the platform's shell does.
+ *
+ * The helper is a shell script, so on Windows it is cmd that has to be able to
+ * run it, and the tests would fail there for the wrong reason otherwise.
+ */
+function runHelper(file) {
+  const { execFileSync } = require('node:child_process');
+  if (process.platform === 'win32') {
+    return execFileSync('cmd.exe', ['/c', file], { encoding: 'utf8' }).trim();
+  }
+  return execFileSync('/bin/sh', [file], { encoding: 'utf8' }).trim();
+}
+
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-test-'));
 }
@@ -1418,7 +1432,7 @@ test('a key helper a config points at is written instead of failing', () => {
   assert.ok(fs.existsSync(wanted));
 
   // The script has to be one the shell can actually run, and print the token.
-  const printed = require('node:child_process').execFileSync('/bin/sh', [wanted], { encoding: 'utf8' }).trim();
+  const printed = runHelper(wanted);
   assert.strictEqual(printed, 'ccr-profile-abcdefghijklmnop');
   assert.ok((fs.statSync(wanted).mode & 0o111) !== 0, 'it is executable');
 });
@@ -1485,8 +1499,11 @@ test('a sign-in command is only used when the agent advertises it', () => {
   assert.strictEqual(agents.findLoginCommand('  delogin   nope'), null);
 });
 
-test('a detected binary path cannot smuggle in a second command', () => {
+test('a detected binary path cannot smuggle in a second command', (t) => {
   const agents = require('../src/main/agents');
+  // Shell quoting is a posix thing; on Windows the value is unused and cmd has
+  // no equivalent, so the quoting is not asserted there.
+  if (process.platform === 'win32') return;
   assert.strictEqual(agents.shellQuote('/bin/sh'), "'/bin/sh'");
   assert.strictEqual(agents.shellQuote("it's"), "'it'\\''s'", 'a quote in the path is escaped, not ended');
   // The semicolon is still in the text, but it sits inside the quotes, so the
@@ -1596,7 +1613,7 @@ test('a config pointing at a removed helper is repointed at one that exists', ()
     'the previous config was kept',
   );
   // And running it the way Claude Code does has to work.
-  const printed = require('node:child_process').execFileSync('/bin/sh', [after.apiKeyHelper], { encoding: 'utf8' }).trim();
+  const printed = runHelper(after.apiKeyHelper);
   assert.strictEqual(printed, 'ccr-profile-survivingtoken');
 });
 

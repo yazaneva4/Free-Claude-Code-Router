@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('node:path');
+
 const updater = require('./updater');
 
 /**
@@ -13,7 +15,14 @@ const updater = require('./updater');
  * update the app offers is one that actually installs.
  */
 
+/*
+ * The build this install replaces. Inside a packaged app it sits beside this
+ * code in the same resources directory, on whatever platform that is, so it is
+ * asked for rather than assumed. The fixed path is the fallback for running
+ * outside a bundle.
+ */
 const TARGET = process.env.CCR_APP_ASAR
+  || (process.resourcesPath && process.type !== 'node' ? path.join(process.resourcesPath, 'app.asar') : null)
   || '/Applications/Claude Code Router.app/Contents/Resources/app.asar';
 
 /**
