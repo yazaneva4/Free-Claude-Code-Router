@@ -174,6 +174,7 @@ class UpdateService {
         version,
         assetUrl: this.status.assetUrl,
         checksumUrl: this.status.checksumUrl,
+        assetDigest: this.status.assetDigest,
         home: this.home || undefined,
         fetchImpl: this.fetchImpl,
         onProgress: report,

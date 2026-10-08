@@ -62,6 +62,14 @@ function assetUrl(assets, name) {
   return found && typeof found.browser_download_url === 'string' ? found.browser_download_url : null;
 }
 
+function assetDigest(assets, name) {
+  if (!Array.isArray(assets)) return null;
+  const found = assets.find((asset) => asset && asset.name === name && !asset.draft);
+  const digest = found && typeof found.digest === 'string' ? found.digest : '';
+  const match = digest.match(/^sha256:([a-f0-9]{64})$/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
 async function fetchLatest({ fetchImpl = fetch, url = RELEASES_URL, timeoutMs = CHECK_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -83,6 +91,7 @@ async function fetchLatest({ fetchImpl = fetch, url = RELEASES_URL, timeoutMs = 
       publishedAt: body.published_at || null,
       assetUrl: assetUrl(body.assets, BUILD_ASSET),
       checksumUrl: assetUrl(body.assets, CHECKSUM_ASSET),
+      assetDigest: assetDigest(body.assets, BUILD_ASSET),
     };
   } catch (err) {
     return { ok: false, error: `Could not reach the update service: ${err && err.message ? err.message : err}` };
@@ -127,6 +136,7 @@ async function check({ currentVersion, home = os.homedir(), force = false, fetch
     publishedAt: latest.ok ? latest.publishedAt : (previous.publishedAt || null),
     assetUrl: latest.ok ? (latest.assetUrl || null) : (previous.assetUrl || null),
     checksumUrl: latest.ok ? (latest.checksumUrl || null) : (previous.checksumUrl || null),
+    assetDigest: latest.ok ? (latest.assetDigest || null) : (previous.assetDigest || null),
   };
   state.updateAvailable = Boolean(latest.ok && compareVersions(latest.version, currentVersion) === 1);
   writeState(state, home);
@@ -143,6 +153,7 @@ module.exports = {
   compareVersions,
   readState,
   writeState,
+  assetDigest,
   fetchLatest,
   check,
 };
