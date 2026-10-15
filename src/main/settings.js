@@ -127,6 +127,11 @@ function sanitizeAgents(value) {
     if (!agent) throw badRequest('unknown_agent', `${agentId} is not an agent this router supports.`);
     const raw = patch && typeof patch === 'object' ? patch : {};
     const profile = {};
+    if (raw.mode !== undefined) {
+      if (!['native', 'fcr'].includes(raw.mode)) throw badRequest('invalid_mode', 'Choose native or fcr mode.');
+      profile.mode = raw.mode;
+    }
+    if (agent.fcr) profile.mode = 'fcr';
     if (raw.enabled !== undefined) {
       if (typeof raw.enabled !== 'boolean') throw badRequest('invalid_value', 'enabled must be true or false.');
       profile.enabled = raw.enabled;

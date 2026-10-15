@@ -64,14 +64,15 @@ function getHarness(harnessId) {
 function publicHarness(harness, state) {
   const current = state || {};
   const builtInModels = harness.builtInModels.slice();
+  const routed = builtInModels.length === 0;
   return {
     id: harness.id,
-    name: harness.name,
+    name: routed ? `:fcr ${harness.name}` : harness.name,
     kind: harness.kind,
     target: { ...harness.target },
-    billing: harness.billing,
-    billingLabel: harness.billingLabel,
-    note: harness.note,
+    billing: routed ? 'free' : harness.billing,
+    billingLabel: routed ? 'No harness subscription; model/provider costs still apply' : harness.billingLabel,
+    note: routed ? 'Uses the models configured in your router. No harness subscription sign-in is collected here.' : harness.note,
     builtInModels,
     enabled: Boolean(current.enabled),
     model: current.model || null,

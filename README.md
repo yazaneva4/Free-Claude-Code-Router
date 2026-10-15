@@ -64,6 +64,19 @@ with `appimagetool`.
 CCR_APP_PATH=/somewhere/Claude\ Code\ Router.app ./install.sh
 ```
 
+## Free routed agents (`:fcr`)
+
+In Settings → Agents, choose `:fcr Claude Code`, `:fcr Codex CLI`, or the
+corresponding `:fcr <agent name>` option before adding the harness. Existing
+profiles can switch modes there too. The `:fcr` alias is accepted by the profile
+API as well, for example `:fcr claude-code`.
+
+This mode uses the configured router models and does not ask for a harness
+subscription or expose subscription-only models. Local models can run without
+cloud inference charges; a configured cloud provider can still charge for its
+models. Switching modes resets the selected model to automatic so a native
+subscription model is not carried into routed mode.
+
 ## Everyday commands
 
 | command | what it does |

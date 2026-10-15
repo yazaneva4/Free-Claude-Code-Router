@@ -66,7 +66,11 @@ const AGENTS = [
 const BY_ID = new Map(AGENTS.map((agent) => [agent.id, agent]));
 
 function getAgent(agentId) {
-  return BY_ID.get(String(agentId || '').trim().toLowerCase()) || null;
+  const value = String(agentId || '').trim().toLowerCase();
+  const fcr = /^:fcr\s+/.test(value);
+  const name = fcr ? value.replace(/^:fcr\s+/, '').trim() : value;
+  const agent = BY_ID.get(name) || (fcr ? AGENTS.find((entry) => entry.name.toLowerCase() === name) : null);
+  return agent ? (fcr ? { ...agent, fcr: true } : agent) : null;
 }
 
 function whichBinary(binary, env = process.env) {
@@ -188,7 +192,8 @@ function shellQuote(value) {
 }
 
 function terminalLauncher(binaryPath, args) {
-  return ['osascript', ['-e', `tell application "Terminal" to do script ${shellQuote(`${binaryPath} ${args.join(' ')}`)}`, '-e', 'tell application "Terminal" to activate']];
+  const command = [binaryPath, ...args].map(shellQuote).join(' ');
+  return ['osascript', ['-e', `tell application "Terminal" to do script ${JSON.stringify(command)}`, '-e', 'tell application "Terminal" to activate']];
 }
 
 function needsSignIn(result) {
@@ -199,6 +204,7 @@ function needsSignIn(result) {
 async function discoverModels(agentId, options = {}) {
   const agent = getAgent(agentId);
   if (!agent) return { models: [], source: 'unknown-agent', reason: 'That agent profile does not exist.' };
+  if (agent.fcr || options.mode === 'fcr') return { models: [], source: 'router', billed: false };
   if (agent.kind !== 'cli') {
     return {
       models: [],
@@ -491,6 +497,7 @@ function profileState(settings) {
 function publicAgent(agent, settings, { knownModels = null, discovered = null, builtInModels = null } = {}) {
   const profiles = profileState(settings);
   const saved = profiles[agent.id] || null;
+  const fcrMode = Boolean(agent.fcr || saved?.mode === 'fcr');
   /*
    * A free agent's models are the ones the free plan includes, so they are
    * listed whether or not anything was asked of a binary, and whether or not the
@@ -502,13 +509,18 @@ function publicAgent(agent, settings, { knownModels = null, discovered = null, b
     const catalog = builtInModels && Array.isArray(builtInModels[agent.id]) ? builtInModels[agent.id] : [];
     if (catalog.length) found = { models: catalog.slice(), source: 'built-in', billed: false };
   }
+  if (fcrMode) found = { models: [], source: 'router', billed: false };
   return {
     id: agent.id,
-    name: agent.name,
+    name: fcrMode ? `:fcr ${agent.name}` : agent.name,
+    nativeName: agent.name,
+    fcrName: `:fcr ${agent.name}`,
+    fcrMode,
+    mode: fcrMode ? 'fcr' : 'native',
     harness: agent.harness,
     kind: agent.kind,
-    paid: agent.paid,
-    billingLabel: agent.billingLabel,
+    paid: fcrMode ? false : agent.paid,
+    billingLabel: fcrMode ? 'No harness subscription; model/provider costs still apply' : agent.billingLabel,
     needsLogin: agent.needsLogin,
     added: Boolean(saved),
     enabled: Boolean(saved && saved.enabled),
@@ -568,10 +580,14 @@ function addProfile(settings, agentId, patch = {}, options = {}) {
   if (!agent) throw badRequest('unknown_agent', 'That agent profile does not exist.');
   const current = profileState(settings);
   const existing = current[agent.id] || {};
+  if (patch.mode !== undefined && !['native', 'fcr'].includes(patch.mode)) throw badRequest('invalid_mode', 'Choose native or fcr mode.');
+  const mode = agent.fcr ? 'fcr' : patch.mode || existing.mode || 'native';
+  const modeChanged = mode !== (existing.mode || 'native');
   const next = {
     ...existing,
+    mode,
     enabled: typeof patch.enabled === 'boolean' ? patch.enabled : existing.enabled !== false,
-    model: patch.model === undefined ? existing.model || 'auto' : validateModel(patch.model, options.knownModels),
+    model: patch.model === undefined ? (modeChanged ? 'auto' : existing.model || 'auto') : validateModel(patch.model, options.knownModels),
     baseUrl: patch.baseUrl === undefined ? existing.baseUrl || GATEWAY_BASE_URL : validateBaseUrl(patch.baseUrl),
     addedAt: existing.addedAt || new Date().toISOString(),
     label: patch.label === undefined ? existing.label : cleanText(patch.label, 60),
@@ -610,6 +626,7 @@ module.exports = {
   localSubscription,
   readModelAliases,
   shellQuote,
+  terminalLauncher,
   startLogin,
   profileState,
   publicAgent,

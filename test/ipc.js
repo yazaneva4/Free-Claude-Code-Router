@@ -369,6 +369,20 @@ test('synced setup without a real https endpoint is refused', async () => {
   assert.strictEqual(state.onboarding.nextStep, 'sync', 'a refused answer must not count as answered');
 });
 
+test(':fcr profiles reject native-only models and skip harness login over IPC', async () => {
+  const h = build();
+  await h.call('auth:signup', GOOD);
+  const saved = await h.call('agents:add', { agentId: ':fcr Claude Code' });
+  assert.strictEqual(saved.profiles['claude-code'].mode, 'fcr');
+  const result = await h.call('agents:login', { agentId: 'claude-code' });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /no harness sign-in/);
+  const error = await h.callFail('agents:update', { agentId: 'claude-code', patch: { model: 'native-only-model' } });
+  assert.strictEqual(error.code, 'unknown_model');
+  await h.call('agents:remove', { agentId: ':fcr Claude Code' });
+  assert.strictEqual(h.settings.get().agents.profiles['claude-code'], undefined);
+});
+
 run();
 
 test('saving a key from the app shares it with the account other devices', async () => {
@@ -465,6 +479,7 @@ test('an agent profile change is saved, not the old config', async () => {
     enabled: true,
     model: 'auto',
     baseUrl: 'http://127.0.0.1:3456',
+    mode: 'native',
     addedAt: stored.addedAt,
   });
 
