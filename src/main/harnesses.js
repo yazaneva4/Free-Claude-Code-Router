@@ -67,7 +67,7 @@ function publicHarness(harness, state) {
   const routed = builtInModels.length === 0;
   return {
     id: harness.id,
-    name: routed ? `:fcr ${harness.name}` : harness.name,
+    name: routed ? `fcr ${harness.name}` : harness.name,
     kind: harness.kind,
     target: { ...harness.target },
     billing: routed ? 'free' : harness.billing,

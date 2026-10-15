@@ -38,6 +38,9 @@ jobs:
       - name: ipc
         run: node scripts/run-step.js test/ipc.js
 
+      - name: terminal installer tests
+        run: node --test test/install.test.js
+
       - name: secret scan
         # This one is genuinely posix shell, so it is asked for by name rather
         # than left to the platform default, which is PowerShell on Windows.

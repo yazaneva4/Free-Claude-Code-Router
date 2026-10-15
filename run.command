@@ -1,7 +1,13 @@
 #!/bin/zsh
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-APP="${CCR_APP_PATH:-/Applications/Claude Code Router.app}"
+if [ -n "${CCR_APP_PATH:-}" ]; then
+  APP="$CCR_APP_PATH"
+elif [ -d "$HOME/Applications/Claude Code Router.app" ]; then
+  APP="$HOME/Applications/Claude Code Router.app"
+else
+  APP="/Applications/Claude Code Router.app"
+fi
 BIN="$APP/Contents/MacOS/Claude Code Router"
 RES="$APP/Contents/Resources"
 SELFTEST_LOG="$HOME/.claude-code-router/selftest.log"
@@ -14,7 +20,7 @@ require_app() {
 This project layers on top of the router rather than replacing it, so install it
 first, then run this again:
 
-  open https://github.com/musistudio/claude-code-router/releases
+  bash install.sh
 
 If it is installed somewhere else, set CCR_APP_PATH to the .app bundle."
     exit 1
@@ -27,14 +33,11 @@ Check CCR_APP_PATH: $APP"
 }
 
 run_node() {
-  ELECTRON_RUN_AS_NODE=1 "$BIN" "$@"
+  CCR_APP_PATH="$APP" ELECTRON_RUN_AS_NODE=1 "$BIN" "$@"
 }
 
 install_build() {
-  run_node "$HERE/scripts/pack-asar.js" "$HERE" /tmp/ccr-build/app.asar
-  cp /tmp/ccr-build/app.asar "$RES/app.asar"
-  codesign --force --deep --sign - "$APP" >/dev/null 2>&1
-  print "installed into $RES/app.asar"
+  bash "$HERE/install.sh" --app-path "$APP"
 }
 
 stop_app() {
@@ -120,7 +123,7 @@ case "$1" in
     require_app
     stop_app
     install_build
-    open -a "Claude Code Router"
+    open "$APP"
     ;;
   --tests)
     require_app
@@ -128,7 +131,7 @@ case "$1" in
     run_node "$HERE/test/run.js"
     run_node "$HERE/test/ipc.js"
     selftest
-    open -a "Claude Code Router"
+    open "$APP"
     ;;
   --selftest)
     require_app
@@ -167,6 +170,6 @@ with repo scope, then run this again.'
     ;;
   *)
     require_app
-    open -a "Claude Code Router"
+    open "$APP"
     ;;
 esac

@@ -369,17 +369,17 @@ test('synced setup without a real https endpoint is refused', async () => {
   assert.strictEqual(state.onboarding.nextStep, 'sync', 'a refused answer must not count as answered');
 });
 
-test(':fcr profiles reject native-only models and skip harness login over IPC', async () => {
+test('fcr profiles reject native-only models and skip harness login over IPC', async () => {
   const h = build();
   await h.call('auth:signup', GOOD);
-  const saved = await h.call('agents:add', { agentId: ':fcr Claude Code' });
+  const saved = await h.call('agents:add', { agentId: 'fcr Claude Code' });
   assert.strictEqual(saved.profiles['claude-code'].mode, 'fcr');
   const result = await h.call('agents:login', { agentId: 'claude-code' });
   assert.strictEqual(result.ok, false);
   assert.match(result.reason, /no harness sign-in/);
   const error = await h.callFail('agents:update', { agentId: 'claude-code', patch: { model: 'native-only-model' } });
   assert.strictEqual(error.code, 'unknown_model');
-  await h.call('agents:remove', { agentId: ':fcr Claude Code' });
+  await h.call('agents:remove', { agentId: 'fcr Claude Code' });
   assert.strictEqual(h.settings.get().agents.profiles['claude-code'], undefined);
 });
 

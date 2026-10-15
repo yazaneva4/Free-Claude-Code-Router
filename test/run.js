@@ -1085,14 +1085,14 @@ test('synced setup demands an https endpoint and device setup clears it', () => 
   assert.strictEqual(local.account.syncEnabled, false, 'choosing this device only drops the endpoint');
 });
 
-test('routed harnesses use :fcr names and never advertise subscription-only models', () => {
+test('routed harnesses use fcr names and never advertise subscription-only models', () => {
   const catalog = harnesses.catalog(harness().settings.get());
   assert.strictEqual(catalog.length, 5);
   const gemini = catalog.find(entry => entry.id === 'gemini-cli');
   assert.strictEqual(gemini.name, 'Gemini CLI');
   assert.deepStrictEqual(gemini.builtInModels, ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash']);
   for (const entry of catalog.filter(entry => entry.id !== 'gemini-cli')) {
-    assert.ok(entry.name.startsWith(':fcr '));
+    assert.ok(entry.name.startsWith('fcr '));
     assert.strictEqual(entry.billing, 'free');
     assert.match(entry.billingLabel, /provider costs/);
     assert.deepStrictEqual(entry.builtInModels, []);
@@ -2189,14 +2189,14 @@ test('sync reports what it actually did, not that it exists', async () => {
 });
 
 
-test(':fcr aliases keep the original profile identity and persist routed mode', () => {
-  assert.strictEqual(agents.getAgent(':fcr Claude Code').id, 'claude-code');
-  assert.strictEqual(agents.getAgent(':fcr codex-cli').id, 'codex-cli');
-  assert.strictEqual(agents.getAgent(':fcr missing'), null);
-  const profiles = agents.addProfile({}, ':fcr Claude Code', { model: 'local-7b' }, { knownModels: ['local-7b'] });
+test('fcr aliases keep the original profile identity and persist routed mode', () => {
+  assert.strictEqual(agents.getAgent('fcr Claude Code').id, 'claude-code');
+  assert.strictEqual(agents.getAgent('fcr codex-cli').id, 'codex-cli');
+  assert.strictEqual(agents.getAgent('fcr missing'), null);
+  const profiles = agents.addProfile({}, 'fcr Claude Code', { model: 'local-7b' }, { knownModels: ['local-7b'] });
   const saved = { agents: { profiles } };
   const view = agents.listAgents(saved, { knownModels: ['local-7b'], discovered: { 'claude-code': { models: ['sonnet'], source: 'subscription', auth: { subscription: true }, billed: true } } }).find(a => a.id === 'claude-code');
-  assert.strictEqual(view.name, ':fcr Claude Code');
+  assert.strictEqual(view.name, 'fcr Claude Code');
   assert.strictEqual(view.fcrMode, true);
   assert.strictEqual(view.subscription, false);
   assert.deepStrictEqual(view.ownModels, []);
@@ -2206,16 +2206,16 @@ test(':fcr aliases keep the original profile identity and persist routed mode', 
   assert.strictEqual(settings.get().agents.profiles['claude-code'].mode, 'fcr');
 });
 
-test('switching between native and :fcr modes resets stale models', () => {
+test('switching between native and fcr modes resets stale models', () => {
   const current = { agents: { profiles: { 'claude-code': { mode: 'native', model: 'sonnet' } } } };
   const profiles = agents.updateProfile(current, 'claude-code', { mode: 'fcr' }, { knownModels: ['local-7b'] });
   assert.strictEqual(profiles['claude-code'].model, 'auto');
   assert.throws(() => agents.updateProfile(current, 'claude-code', { mode: 'wrong' }), /native or fcr/);
 });
 
-test(':fcr model discovery never invokes the harness subscription commands', async () => {
+test('fcr model discovery never invokes the harness subscription commands', async () => {
   const run = async () => { throw new Error('must not run'); };
-  const found = await agents.discoverModels(':fcr Claude Code', { run });
+  const found = await agents.discoverModels('fcr Claude Code', { run });
   assert.deepStrictEqual(found.models, []);
   assert.strictEqual(found.source, 'router');
   assert.strictEqual((await agents.discoverModels('codex-cli', { run, mode: 'fcr' })).source, 'router');
