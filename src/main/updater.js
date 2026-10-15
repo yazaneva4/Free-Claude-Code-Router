@@ -89,6 +89,9 @@ function describeRelease(release) {
       error: `Release ${version} does not carry ${ASSET_NAME} and ${CHECKSUM_NAME}, so it cannot be installed safely.`,
     };
   }
+  if (release.assetDigest && !/^([a-f0-9]{64})$/i.test(String(release.assetDigest))) {
+    return { ok: false, code: 'bad_digest', version, error: `Release ${version} has an invalid GitHub SHA-256 digest.` };
+  }
   return {
     ok: true,
     state: 'ready',
@@ -98,6 +101,7 @@ function describeRelease(release) {
     publishedAt: release.publishedAt || null,
     assetUrl: release.assetUrl,
     checksumUrl: release.checksumUrl,
+    assetDigest: release.assetDigest,
     assetName: ASSET_NAME,
   };
 }
@@ -159,6 +163,7 @@ async function check({ currentVersion, home = os.homedir(), force = false, fetch
     publishedAt: described.publishedAt || null,
     assetUrl: described.assetUrl || null,
     checksumUrl: described.checksumUrl || null,
+    assetDigest: described.assetDigest || null,
     error: described.ok ? null : described.error,
     cached: Boolean(found.cached),
     checkedAt: new Date(now).toISOString(),
@@ -216,9 +221,10 @@ async function fetchBuffer(url, { fetchImpl = fetch, timeoutMs = DOWNLOAD_TIMEOU
  * Fetches the build and its hash, and only accepts them as a pair. A build that
  * does not match its published hash is never written to disk.
  */
-async function download({ version, assetUrl, checksumUrl, home = os.homedir(), fetchImpl = fetch, onProgress = null } = {}) {
+async function download({ version, assetUrl, checksumUrl, assetDigest, home = os.homedir(), fetchImpl = fetch, onProgress = null } = {}) {
   if (!parseVersion(version)) throw fail('bad_version', 'No version was given to download.');
   if (!assetUrl || !checksumUrl) throw fail('missing_asset', `This release does not carry ${ASSET_NAME} and ${CHECKSUM_NAME}.`);
+  if (assetDigest && !/^([a-f0-9]{64})$/i.test(String(assetDigest))) throw fail('bad_digest', 'The GitHub SHA-256 digest is not valid.');
 
   const report = typeof onProgress === 'function' ? onProgress : () => {};
   report({ phase: 'download', ratio: 0 });
@@ -232,6 +238,9 @@ async function download({ version, assetUrl, checksumUrl, home = os.homedir(), f
   if (!expected) throw fail('bad_checksum', 'The published checksum file is not a SHA-256 hash, so the build cannot be trusted.');
 
   const actual = sha256(asset.buffer);
+  if (assetDigest && actual !== String(assetDigest).toLowerCase()) {
+    throw fail('digest_mismatch', 'The downloaded build does not match GitHub’s SHA-256 digest, so it was not installed.');
+  }
   if (actual !== expected) {
     throw fail('checksum_mismatch', 'The downloaded build does not match the hash published with it, so it was not installed.');
   }

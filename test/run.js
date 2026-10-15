@@ -1146,7 +1146,7 @@ function updateFixture({ tag = 'v1.1.0', body = 'What changed', assets = null, b
   state.hash = updater.sha256(state.build);
   const list = assets === null
     ? [
-        { name: 'app.asar', browser_download_url: 'https://cdn.test/app.asar' },
+        { name: 'app.asar', browser_download_url: 'https://cdn.test/app.asar', digest: `sha256:${state.hash}` },
         { name: 'app.asar.sha256', browser_download_url: 'https://cdn.test/app.asar.sha256' },
       ]
     : assets;
@@ -1217,7 +1217,7 @@ test('a published build is offered and installs for real', async () => {
   assert.strictEqual(found.latestVersion, '1.1.0');
   assert.ok(found.assetUrl && found.checksumUrl);
 
-  const got = await updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, home, fetchImpl: fixture.fetchImpl });
+  const got = await updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, assetDigest: found.assetDigest, home, fetchImpl: fixture.fetchImpl });
   assert.strictEqual(got.sha256, fixture.state.hash);
 
   const done = updater.install({ version: '1.1.0', file: got.file, target, home });
@@ -1238,10 +1238,31 @@ test('a build that does not match its published hash is never installed', async 
   assert.strictEqual(found.updateAvailable, true);
 
   await assert.rejects(
-    () => updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, home, fetchImpl: fixture.fetchImpl }),
+    () => updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, assetDigest: found.assetDigest, home, fetchImpl: fixture.fetchImpl }),
     (err) => err.code === 'checksum_mismatch',
   );
   assert.strictEqual(fs.readFileSync(target).equals(before), true, 'the installed build is untouched');
+});
+
+test('a build that does not match GitHub asset digest is never staged', async () => {
+  const home = tempDir();
+  const fixture = updateFixture({ build: ASAR_110 });
+  fixture.release.assets[0].digest = `sha256:${'0'.repeat(64)}`;
+  const found = await updater.check({ currentVersion: '1.0.0', home, fetchImpl: fixture.fetchImpl, force: true });
+  assert.strictEqual(found.updateAvailable, true);
+  await assert.rejects(
+    () => updater.download({ version: '1.1.0', assetUrl: found.assetUrl, checksumUrl: found.checksumUrl, assetDigest: found.assetDigest, home, fetchImpl: fixture.fetchImpl }),
+    (err) => err.code === 'digest_mismatch',
+  );
+  assert.strictEqual(fs.existsSync(path.join(home, '.claude-code-router', 'updates', '1.1.0', 'app.build')), false);
+});
+
+test('a release with GitHub asset digest is checked against both published hashes', async () => {
+  const fixture = updateFixture({ build: ASAR_110 });
+  delete fixture.release.assets[0].digest;
+  const found = await updater.check({ currentVersion: '1.0.0', home: tempDir(), fetchImpl: fixture.fetchImpl, force: true });
+  assert.strictEqual(found.updateAvailable, true, 'the published sidecar remains available for older releases');
+  assert.strictEqual(found.assetDigest, null);
 });
 
 test('a release without a build is reported instead of half applied', async () => {
@@ -1251,7 +1272,7 @@ test('a release without a build is reported instead of half applied', async () =
   assert.strictEqual(found.updateAvailable, false);
   assert.strictEqual(found.state, 'incomplete-release');
   assert.strictEqual(found.code, 'missing_asset');
-  assert.ok(/app\.asar/.test(found.error), 'it says what is missing');
+  assert.ok(/build|app\.asar/i.test(found.error), 'it says what is missing');
 });
 
 test('the app is never offered its own version or an older one', async () => {
@@ -1920,7 +1941,7 @@ test('a scheduled check only ever reports, it never installs', async () => {
     asked += 1;
     if (url.includes('/releases/latest')) {
       return { ok: true, status: 200, json: async () => ({ tag_name: 'v1.1.0', body: 'notes', assets: [
-        { name: 'app.asar', browser_download_url: 'https://cdn.test/app.asar' },
+        { name: 'app.asar', browser_download_url: 'https://cdn.test/app.asar', digest: `sha256:${updater.sha256(build)}` },
         { name: 'app.asar.sha256', browser_download_url: 'https://cdn.test/app.asar.sha256' },
       ] }) };
     }
