@@ -336,7 +336,7 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
     session();
     const agent = agents.getAgent(payload.agentId);
     if (agent?.fcr || agents.profileState(settings.get())[agent?.id]?.mode === 'fcr') {
-      return { ok: false, reason: 'The :fcr agent uses your configured router; no harness sign-in is needed.' };
+      return { ok: false, reason: 'The fcr agent uses your configured router; no harness sign-in is needed.' };
     }
     const result = await agents.startLogin(payload.agentId);
     // Whatever the agent now reports is what gets kept, so a subscription's

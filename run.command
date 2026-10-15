@@ -31,10 +31,7 @@ run_node() {
 }
 
 install_build() {
-  run_node "$HERE/scripts/pack-asar.js" "$HERE" /tmp/ccr-build/app.asar
-  cp /tmp/ccr-build/app.asar "$RES/app.asar"
-  codesign --force --deep --sign - "$APP" >/dev/null 2>&1
-  print "installed into $RES/app.asar"
+  run_node "$HERE/scripts/install.js" --app-path "$APP"
 }
 
 stop_app() {

@@ -6,70 +6,67 @@ account system in front of the router, keeps your API keys encrypted, shares
 them with your other devices if you want, and installs updates that actually
 work.
 
-## Install
+## Install from a terminal
 
-The router app is not in this repository. This project layers on top of it, so
-install it once first:
+Install **Git and Node.js 22 or newer**, and close any running router app. Then
+clone this repository:
 
-| platform | what to install |
+```sh
+git clone https://github.com/yazaneva4/Free-Claude-Code-Router.git
+cd Free-Claude-Code-Router
+```
+
+Run the command for your operating system:
+
+| Operating system | Terminal command |
 | --- | --- |
-| macOS | `Claude-Code-Router-*.dmg` or `.zip` from the [releases](https://github.com/musistudio/claude-code-router/releases), moved to `/Applications` |
-| Linux | `Claude-Code-Router-*.AppImage` from the same page |
-| Windows | `Claude-Code-Router-*.exe` from the same page |
+| macOS | `bash install.sh` |
+| Linux desktop | `bash install.sh` |
+| Windows PowerShell | `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1` |
 
-Then, from a clone of this repository:
+`node scripts/install.js` or `npm run setup:app` also works on all three systems.
+No `npm install` is required. If you already cloned the repo, run
+`git pull --ff-only` first.
 
-```sh
-./install.sh                      # macOS and Linux
-powershell -ExecutionPolicy Bypass -File install.ps1   # Windows
-```
+The installer finds an existing desktop app. If none is installed, it downloads
+the matching official [desktop release](https://github.com/musistudio/claude-code-router/releases),
+checks GitHub's SHA-256 digest, installs the runtime, and applies this repo's
+build. It keeps `app-original.asar` and `app.asar.before-gate` for recovery.
+macOS bundles are re-signed; a signing failure restores the previous archive.
 
-Either script finds the installed app, packs this repository, and replaces one
-file inside it: `resources/app.asar`. The build it replaced is kept beside it as
-`app.asar.before-gate`. Nothing else in the app is touched, and on macOS the
-bundle is re-signed afterwards, because a bundle edited after signing will not
-launch.
+| System | Default location for a fresh installation |
+| --- | --- |
+| macOS | `~/Applications/Claude Code Router.app` |
+| Linux | `~/.local/opt/Claude Code Router` |
+| Windows | `%LOCALAPPDATA%\Programs\Claude Code Router` |
 
-`./run.command --install` does the same thing on macOS and also opens the app.
+Linux AppImages are extracted automatically, so FUSE is not required for the
+installation. The extracted Electron app still needs your distribution's normal
+desktop libraries and a graphical session. Downloads are available only for
+architectures present in the upstream release; the installer reports unsupported
+combinations rather than choosing the wrong binary.
 
-### What is verified where
-
-| | macOS | Linux | Windows |
-| --- | --- | --- | --- |
-| test suites in CI | pass | pass | pass |
-| `install.sh` / `install.ps1` | **verified here** | untested | untested |
-| liquid glass, RTL, 20 languages | verified here | untested | untested |
-| the `apiKeyHelper` fallback | works | works | **does not apply** |
-
-One Windows gap worth naming: the fallback that points Claude Code at a key
-helper is a `/bin/sh` script, and Windows has no such shell. Nothing is broken
-by it there, because the fallback only comes into play when there is no
-subscription login to use, and on Windows the answer is to sign in. It is not
-papered over with a `.cmd` shim, because whether Claude Code executes that
-helper through `cmd.exe` has not been checked from here.
-
-The suites run on all three platforms on every push, which is real evidence
-rather than an assumption. What has not been done is installing the app on a
-Linux or Windows machine and looking at it, because this was built on a Mac.
-
-One Linux caveat worth knowing before you try: the router ships as an
-**AppImage**, which is a read-only image, so a file cannot be swapped inside it.
-`install.sh` says so plainly rather than half working. On Linux, extract the
-AppImage and run the installer against the extracted directory, or rebuild it
-with `appimagetool`.
-
-### If the app is somewhere unusual
+For an existing app in another location, or a downloaded Linux AppImage:
 
 ```sh
-CCR_APP_PATH=/somewhere/Claude\ Code\ Router.app ./install.sh
+node scripts/install.js --app-path "/path/to/the/app-or-AppImage"
 ```
 
-## Free routed agents (`:fcr`)
+`CCR_APP_PATH` and `CCR_NODE` are also supported by the shell/PowerShell entry
+points. `./run.command --install` installs and opens an existing macOS app.
 
-In Settings → Agents, choose `:fcr Claude Code`, `:fcr Codex CLI`, or the
-corresponding `:fcr <agent name>` option before adding the harness. Existing
-profiles can switch modes there too. The `:fcr` alias is accepted by the profile
-API as well, for example `:fcr claude-code`.
+Installer tests cover all three OS branches with fixture runtimes and simulated
+native extraction/signing commands. The router suites run on macOS, Linux and
+Windows in CI. The official Linux v3.1.3 AppImage was also downloaded, verified, extracted and
+patched successfully in an isolated test directory. Actual desktop launch, OS
+installer dialogs and visual behavior require testing on the destination machine.
+
+## Free routed agents (`fcr`)
+
+In Settings → Agents, choose `fcr Claude Code`, `fcr Codex CLI`, or the
+corresponding `fcr <agent name>` option before adding the harness. Existing
+profiles can switch modes there too. The `fcr` alias is accepted by the profile
+API as well, for example `fcr claude-code`.
 
 This mode uses the configured router models and does not ask for a harness
 subscription or expose subscription-only models. Local models can run without

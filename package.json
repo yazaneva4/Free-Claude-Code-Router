@@ -7,7 +7,9 @@
   "scripts": {
     "start": "electron .",
     "check": "node scripts/check.js",
-    "test": "node test/run.js"
+    "test": "node test/run.js",
+    "setup:app": "node scripts/install.js",
+    "test:install": "node --test test/install.test.js"
   },
   "engines": {
     "node": ">=20"

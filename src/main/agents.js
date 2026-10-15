@@ -67,8 +67,8 @@ const BY_ID = new Map(AGENTS.map((agent) => [agent.id, agent]));
 
 function getAgent(agentId) {
   const value = String(agentId || '').trim().toLowerCase();
-  const fcr = /^:fcr\s+/.test(value);
-  const name = fcr ? value.replace(/^:fcr\s+/, '').trim() : value;
+  const fcr = /^:?fcr\s+/.test(value);
+  const name = fcr ? value.replace(/^:?fcr\s+/, '').trim() : value;
   const agent = BY_ID.get(name) || (fcr ? AGENTS.find((entry) => entry.name.toLowerCase() === name) : null);
   return agent ? (fcr ? { ...agent, fcr: true } : agent) : null;
 }
@@ -512,9 +512,9 @@ function publicAgent(agent, settings, { knownModels = null, discovered = null, b
   if (fcrMode) found = { models: [], source: 'router', billed: false };
   return {
     id: agent.id,
-    name: fcrMode ? `:fcr ${agent.name}` : agent.name,
+    name: fcrMode ? `fcr ${agent.name}` : agent.name,
     nativeName: agent.name,
-    fcrName: `:fcr ${agent.name}`,
+    fcrName: `fcr ${agent.name}`,
     fcrMode,
     mode: fcrMode ? 'fcr' : 'native',
     harness: agent.harness,
