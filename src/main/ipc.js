@@ -61,8 +61,11 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
   };
   // A model is acceptable if the gateway serves it or the agent itself reported
   // it, so a published built-in is never refused as "unknown".
-  const acceptableModels = async (agentId) => {
+  const acceptableModels = async (agentId, patch = {}) => {
     const models = await knownModels();
+    const agent = agents.getAgent(agentId);
+    const current = agent ? agents.profileState(settings.get())[agent.id] : null;
+    if (agent?.fcr || patch.mode === 'fcr' || (patch.mode === undefined && current?.mode === 'fcr')) return models;
     const found = await agents.discoverModels(agentId);
     return Array.from(new Set([...models, ...(found.models || [])]));
   };
@@ -298,12 +301,14 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
         .map(async (entry) => {
           discovered[entry.id] = await agents.discoverModels(entry.id, {
             timeoutMs: 12000,
+            mode: agents.profileState(settings.get())[entry.id]?.mode,
             builtInModels: builtInFor(entry.id),
           });
         }),
     );
     return {
-      agents: agents.listAgents(settings.get(), { knownModels: known, discovered, builtInModels: builtInCatalogue() }),
+      agents: agents.listAgents(settings.get(), { knownModels: known, discovered, builtInModels: builtInCatalogue() })
+        .map((agent) => ({ ...agent, ...detected.find((entry) => entry.id === agent.id) })),
       detection: detected,
       models: known,
     };
@@ -311,7 +316,7 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
 
   handle(ipcMain, 'agents:add', async (payload) => {
     session();
-    const known = await acceptableModels(payload.agentId);
+    const known = await acceptableModels(payload.agentId, payload.patch || {});
     const profiles = agents.addProfile(settings.get(), payload.agentId, payload.patch || {}, { knownModels: known });
     const saved = settings.setAgentProfiles(profiles);
     if (sync) sync.schedulePush();
@@ -320,7 +325,7 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
 
   handle(ipcMain, 'agents:update', async (payload) => {
     session();
-    const known = await acceptableModels(payload.agentId);
+    const known = await acceptableModels(payload.agentId, payload.patch || {});
     const profiles = agents.updateProfile(settings.get(), payload.agentId, payload.patch || {}, { knownModels: known });
     const saved = settings.setAgentProfiles(profiles);
     if (sync) sync.schedulePush();
@@ -329,11 +334,15 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
 
   handle(ipcMain, 'agents:login', async (payload) => {
     session();
+    const agent = agents.getAgent(payload.agentId);
+    if (agent?.fcr || agents.profileState(settings.get())[agent?.id]?.mode === 'fcr') {
+      return { ok: false, reason: 'The :fcr agent uses your configured router; no harness sign-in is needed.' };
+    }
     const result = await agents.startLogin(payload.agentId);
     // Whatever the agent now reports is what gets kept, so a subscription's
     // models show up without anything being retyped.
     if (result.ok && result.models && result.models.length) {
-      const known = await acceptableModels(payload.agentId);
+      const known = await acceptableModels(payload.agentId, payload.patch || {});
       const profiles = agents.addProfile(settings.get(), payload.agentId, {}, { knownModels: [...known, ...result.models] });
       settings.setAgentProfiles(profiles);
       if (sync) sync.schedulePush();

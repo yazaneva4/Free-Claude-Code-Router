@@ -175,7 +175,7 @@
 
   /** Sign-in is worth offering when the agent is installed and has no subscription. */
   function needsSignIn(agent) {
-    if (agent.kind !== 'cli' || !agent.installed) return false;
+    if (agent.fcrMode || agent.kind !== 'cli' || !agent.installed) return false;
     return !agent.subscription;
   }
 
@@ -212,6 +212,29 @@
       source.textContent = agentSourceLabel(agent);
       card.append(head, source);
 
+      const mode = document.createElement('select');
+      mode.setAttribute('aria-label', `Mode for ${agent.nativeName || agent.name}`);
+      for (const [value, text] of [['native', agent.nativeName || agent.name], ['fcr', agent.fcrName]]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        option.selected = agent.mode === value;
+        mode.append(option);
+      }
+      mode.addEventListener('change', async () => {
+        if (!agent.added) return;
+        mode.disabled = true;
+        try {
+          await api.agents.update(agent.id, { mode: mode.value });
+          await loadAgents();
+        } catch (err) {
+          mode.value = agent.mode;
+          mode.disabled = false;
+          toast(err.message, true);
+        }
+      });
+      card.append(mode);
+
       if (!agent.added) {
         const notYet = document.createElement('p');
         notYet.className = 'hint';
@@ -234,7 +257,7 @@
         caption.textContent = own.length ? t('agents.ownModels') : t('agents.gatewayModels');
         const select = document.createElement('select');
         select.dataset.role = 'model';
-        for (const model of choices) {
+        for (const model of ['auto', ...choices.filter((model) => model !== 'auto')]) {
           const option = document.createElement('option');
           option.value = model;
           option.textContent = model;
@@ -248,6 +271,7 @@
           select.disabled = true;
           try {
             await api.agents.update(agent.id, { model: chosen });
+            agent.model = chosen;
             toast(t('agents.toast.model', { model: chosen }));
           } catch (err) {
             toast(err.message, true);
@@ -280,7 +304,7 @@
             toast(t('agents.toast.removed', { name: agent.name }));
           } else {
             const select = card.querySelector('[data-role=model]');
-            await api.agents.add(agent.id, select ? { model: select.value } : {});
+            await api.agents.add(agent.id, { mode: mode.value, ...(select ? { model: select.value } : {}) });
             toast(t('agents.toast.added', { name: agent.name }));
           }
           await loadAgents();

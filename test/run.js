@@ -1085,23 +1085,18 @@ test('synced setup demands an https endpoint and device setup clears it', () => 
   assert.strictEqual(local.account.syncEnabled, false, 'choosing this device only drops the endpoint');
 });
 
-test('harness catalog flags paid harnesses and keeps built-in models for the free one', () => {
-  const h = harness();
-  const catalog = harnesses.catalog(h.settings.get());
+test('routed harnesses use :fcr names and never advertise subscription-only models', () => {
+  const catalog = harnesses.catalog(harness().settings.get());
   assert.strictEqual(catalog.length, 5);
-  const gemini = catalog.find((harness) => harness.id === 'gemini-cli');
-  assert.strictEqual(gemini.billing, 'free');
+  const gemini = catalog.find(entry => entry.id === 'gemini-cli');
+  assert.strictEqual(gemini.name, 'Gemini CLI');
   assert.deepStrictEqual(gemini.builtInModels, ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash']);
-  const paid = catalog.filter((harness) => harness.billing === 'required');
-  assert.deepStrictEqual(paid.map((harness) => harness.id), ['claude-code'], 'only Claude Code needs a paid plan');
-  assert.ok(paid.every((harness) => harness.builtInModels.length === 0), 'paid harnesses get no built-in models');
-  const free = catalog.filter((harness) => harness.billing === 'free');
-  assert.deepStrictEqual(
-    free.map((harness) => harness.id),
-    ['claude-app', 'codex-app', 'codex-cli', 'gemini-cli'],
-    'Claude, Codex and Gemini all run on the free plan',
-  );
-  assert.ok(catalog.every((harness) => harness.target && harness.target.kind && harness.target.name));
+  for (const entry of catalog.filter(entry => entry.id !== 'gemini-cli')) {
+    assert.ok(entry.name.startsWith(':fcr '));
+    assert.strictEqual(entry.billing, 'free');
+    assert.match(entry.billingLabel, /provider costs/);
+    assert.deepStrictEqual(entry.builtInModels, []);
+  }
 });
 
 test('harness selections land in the matching integrations and never invent a model', () => {
@@ -1128,10 +1123,7 @@ test('harness selections ignore unknown harnesses entirely', () => {
   assert.strictEqual(h.settings.get().integrations.cli.gemini.enabled, false);
 });
 
-Promise.all(pending).then(() => {
-  console.log(`\n${passed} passed, ${failed} failed`);
-  process.exit(failed ? 1 : 0);
-});
+
 
 /* ---------------------------------------------------------------- updates */
 
@@ -1662,7 +1654,7 @@ test('a sign-in that needs a session is handed to the user, not typed for them',
     run,
     launch: (binary, args) => {
       launched.push([binary, args]);
-      return ['osascript', ['-e', 'noop']];
+      return [process.execPath, ['-e', '']];
     },
   });
   assert.strictEqual(result.ok, true);
@@ -2194,4 +2186,50 @@ test('sync reports what it actually did, not that it exists', async () => {
   assert.ok(after.lastPush && after.lastPush.pushedAt, 'a real push is recorded when one happens');
   assert.strictEqual(after.endpoint, 'https://sync.example.com');
   worker.stopAutoPull();
+});
+
+
+test(':fcr aliases keep the original profile identity and persist routed mode', () => {
+  assert.strictEqual(agents.getAgent(':fcr Claude Code').id, 'claude-code');
+  assert.strictEqual(agents.getAgent(':fcr codex-cli').id, 'codex-cli');
+  assert.strictEqual(agents.getAgent(':fcr missing'), null);
+  const profiles = agents.addProfile({}, ':fcr Claude Code', { model: 'local-7b' }, { knownModels: ['local-7b'] });
+  const saved = { agents: { profiles } };
+  const view = agents.listAgents(saved, { knownModels: ['local-7b'], discovered: { 'claude-code': { models: ['sonnet'], source: 'subscription', auth: { subscription: true }, billed: true } } }).find(a => a.id === 'claude-code');
+  assert.strictEqual(view.name, ':fcr Claude Code');
+  assert.strictEqual(view.fcrMode, true);
+  assert.strictEqual(view.subscription, false);
+  assert.deepStrictEqual(view.ownModels, []);
+  assert.deepStrictEqual(view.gatewayModels, ['local-7b']);
+  const settings = new Settings({ store: new Store(tempDir()) });
+  settings.setAgentProfiles(profiles);
+  assert.strictEqual(settings.get().agents.profiles['claude-code'].mode, 'fcr');
+});
+
+test('switching between native and :fcr modes resets stale models', () => {
+  const current = { agents: { profiles: { 'claude-code': { mode: 'native', model: 'sonnet' } } } };
+  const profiles = agents.updateProfile(current, 'claude-code', { mode: 'fcr' }, { knownModels: ['local-7b'] });
+  assert.strictEqual(profiles['claude-code'].model, 'auto');
+  assert.throws(() => agents.updateProfile(current, 'claude-code', { mode: 'wrong' }), /native or fcr/);
+});
+
+test(':fcr model discovery never invokes the harness subscription commands', async () => {
+  const run = async () => { throw new Error('must not run'); };
+  const found = await agents.discoverModels(':fcr Claude Code', { run });
+  assert.deepStrictEqual(found.models, []);
+  assert.strictEqual(found.source, 'router');
+  assert.strictEqual((await agents.discoverModels('codex-cli', { run, mode: 'fcr' })).source, 'router');
+});
+
+
+
+test('macOS terminal launch quotes the executable for the shell and AppleScript separately', () => {
+  const binary = "/opt/my agent/it's claude";
+  const [command, args] = agents.terminalLauncher(binary, ['hello world']);
+  assert.strictEqual(command, 'osascript');
+  assert.strictEqual(args[1], `tell application "Terminal" to do script ${JSON.stringify([binary, 'hello world'].map(agents.shellQuote).join(' '))}`);
+});
+Promise.all(pending).then(() => {
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
 });
