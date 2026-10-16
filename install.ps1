@@ -23,8 +23,14 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 if (-not (Test-Node)) {
   Install-Dependency 'OpenJS.NodeJS.LTS'
-  $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
 }
+# winget upgrade is a no-op when the installed package is already current.
+if (Get-Command winget -ErrorAction SilentlyContinue) {
+  foreach ($Id in @('Git.Git', 'OpenJS.NodeJS.LTS')) {
+    & winget upgrade --id $Id --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+  }
+}
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
 if (-not (Test-Node)) { throw 'Node.js 22+ is unavailable after installation. Reopen PowerShell or install a supported version.' }
 $Arguments = @((Join-Path $Root 'scripts\install.js'))
 if ($AppPath) { $Arguments += @('--app-path', $AppPath) }
