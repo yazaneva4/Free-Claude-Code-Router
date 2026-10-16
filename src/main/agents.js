@@ -77,11 +77,11 @@ function whichBinary(binary, env = process.env) {
   if (!binary) return null;
   const dirs = String(env.PATH || '').split(path.delimiter).filter(Boolean);
   for (const dir of dirs) {
-    const candidate = path.join(dir, binary);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {}
+    const names = process.platform === 'win32' ? [binary, ...String(env.PATHEXT || '.EXE;.CMD;.BAT').split(';').filter(Boolean).map(ext => binary + ext.toLowerCase())] : [binary];
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {}
+    }
   }
   return null;
 }
@@ -512,6 +512,7 @@ function publicAgent(agent, settings, { knownModels = null, discovered = null, b
   if (fcrMode) found = { models: [], source: 'router', billed: false };
   return {
     id: agent.id,
+    launchReason: require('./routed-launcher').support(agent.id),
     name: fcrMode ? `fcr ${agent.name}` : agent.name,
     nativeName: agent.name,
     fcrName: `fcr ${agent.name}`,

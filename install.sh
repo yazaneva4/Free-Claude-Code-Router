@@ -25,7 +25,9 @@ install_deps() {
   fi
 }
 # Upgrade only when the package manager reports a newer available package.
-if command -v brew >/dev/null 2>&1; then
+if [[ "${CCR_SKIP_DEPENDENCY_UPDATE:-0}" == 1 ]]; then
+  command -v git >/dev/null 2>&1 || { printf '%s\n' 'Git is required when dependency updates are skipped.' >&2; exit 1; }
+elif command -v brew >/dev/null 2>&1; then
   for pkg in git node; do
     if ! brew list --versions "$pkg" >/dev/null 2>&1; then
       brew install "$pkg"

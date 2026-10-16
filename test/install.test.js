@@ -107,7 +107,7 @@ test('macOS signing failure restores the previous archive and reports failure', 
 test('terminal entry point honors CCR_NODE and works from a path with spaces', t => {
   const f = fixture(t), appPath = path.join(f.home, 'app with spaces' + (process.platform === 'darwin' ? '.app' : ''));
   f.runtime(appPath);
-  const env = { ...process.env, CCR_NODE: process.execPath };
+  const env = { ...process.env, CCR_NODE: process.execPath, CCR_SKIP_DEPENDENCY_UPDATE: '1' };
   if (process.platform === 'darwin') {
     // Signing the fake bundle is simulated; the shell/Node handoff is real.
     const bin = path.join(f.home, 'bin'); fs.mkdirSync(bin);

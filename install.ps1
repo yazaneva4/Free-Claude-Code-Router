@@ -25,7 +25,7 @@ if (-not (Test-Node)) {
   Install-Dependency 'OpenJS.NodeJS.LTS'
 }
 # winget upgrade is a no-op when the installed package is already current.
-if (Get-Command winget -ErrorAction SilentlyContinue) {
+if ($env:CCR_SKIP_DEPENDENCY_UPDATE -ne '1' -and (Get-Command winget -ErrorAction SilentlyContinue)) {
   foreach ($Id in @('Git.Git', 'OpenJS.NodeJS.LTS')) {
     & winget upgrade --id $Id --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
   }

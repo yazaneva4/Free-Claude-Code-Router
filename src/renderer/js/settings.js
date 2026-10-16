@@ -314,12 +314,14 @@
         }
       });
       row.append(button);
-      if (agent.added && agent.fcrMode && agent.kind === 'cli' && agent.id === 'claude-code') {
+      if (agent.added && agent.fcrMode) {
         const run = document.createElement('button');
         run.type = 'button';
         run.className = 'primary';
         run.dataset.role = 'run';
         run.textContent = 'Run';
+        run.disabled = Boolean(agent.launchReason || !agent.enabled || !agent.model);
+        run.title = agent.launchReason || (!agent.model ? 'Choose and save a model first.' : 'Open this routed profile.');
         run.addEventListener('click', async () => {
           run.disabled = true;
           try {

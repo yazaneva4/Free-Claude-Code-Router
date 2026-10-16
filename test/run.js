@@ -368,11 +368,12 @@ test('model normalization handles ollama and openai shapes', () => {
   assert.deepStrictEqual(tags.map((m) => m.id), ['qwen2.5']);
 });
 
-test('settings default to local providers and refuse unsupported or unknown routing', () => {
+test('settings start with no provider and refuse unsupported or unknown routing', () => {
   const h = harness();
   const defaults = h.settings.get();
-  assert.strictEqual(defaults.routing.preferredProvider, 'ollama');
-  assert.deepStrictEqual(defaults.routing.fallbackOrder, ['lmstudio', 'ollama', 'llamacpp']);
+  assert.strictEqual(defaults.routing.preferredProvider, null);
+  assert.deepStrictEqual(defaults.providers, {});
+  assert.deepStrictEqual(defaults.routing.fallbackOrder, []);
   assert.throws(() => h.settings.setRouting({ preferredProvider: 'huggingface' }), (err) => err.code === 'unsupported_provider');
   assert.throws(() => h.settings.setRouting({ preferredProvider: 'made-up' }), (err) => err.code === 'unknown_provider');
   const updated = h.settings.setRouting({ preferredProvider: 'llamacpp', fallbackOrder: ['llamacpp', 'ollama'] });
@@ -654,7 +655,7 @@ test('a synced or hand-edited file cannot smuggle in what we refuse', () => {
   assert.ok(withJunk.integrations.cli.gemini, 'the real integrations are untouched');
   const untouched = h.settings.get();
   assert.deepStrictEqual(untouched.agents.profiles, {}, 'a refused write changes nothing on disk');
-  assert.ok(untouched.providers.ollama, 'the real settings are still intact');
+  assert.deepStrictEqual(untouched.providers, {}, 'refused input does not configure providers');
 });
 
 test('settings pushed to a sync endpoint keep their refusals when they come back', async () => {
@@ -1497,7 +1498,7 @@ function helperHome(token) {
 
 test('a key helper a config points at is written instead of failing', () => {
   const { home, bin } = helperHome('ccr-profile-abcdefghijklmnop');
-  const claudeDir = path.join(home, '.claude');
+  const claudeDir = path.join(home, '.claude-code-router', 'profiles', 'claude-code', 'claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   // The profile changed, so the config now names a scope whose script was never
   // written. This is what made every agent start fail with `exited 127`.
@@ -1674,7 +1675,7 @@ test('a desktop app is sent to its own sign-in', async () => {
 
 test('a config pointing at a removed helper is repointed at one that exists', () => {
   const { home, bin } = helperHome('ccr-profile-survivingtoken');
-  const claudeDir = path.join(home, '.claude');
+  const claudeDir = path.join(home, '.claude-code-router', 'profiles', 'claude-code', 'claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   // The profile the config names is not in use, so its script is gone. Writing
   // it again would not last, because the router removes it on every launch.
@@ -1705,7 +1706,7 @@ test('with no helper at all the config is left alone rather than given a fake to
   const home = tempDir();
   const bin = path.join(home, '.claude-code-router', 'bin');
   fs.mkdirSync(bin, { recursive: true });
-  const claudeDir = path.join(home, '.claude');
+  const claudeDir = path.join(home, '.claude-code-router', 'profiles', 'claude-code', 'claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   const wanted = path.join(bin, apiKeyHelper.helperName('claude-code'));
   const config = path.join(claudeDir, 'settings.json');
@@ -2095,7 +2096,7 @@ test('an agent can be taken away and put back', async () => {
   // Removing is not retiring it: it goes back in exactly as it was.
   const again = agents.addProfile(gone, 'claude-code', {}, { knownModels: [] });
   assert.strictEqual(again['claude-code'].enabled, true);
-  assert.strictEqual(again['claude-code'].model, 'auto');
+  assert.strictEqual(again['claude-code'].model, null);
   // And doing it twice is harmless.
   assert.strictEqual(agents.removeProfile(agents.removeProfile(again, 'claude-code'), 'claude-code')['claude-code'], undefined);
 });
@@ -2209,7 +2210,7 @@ test('fcr aliases keep the original profile identity and persist routed mode', (
 test('switching between native and fcr modes resets stale models', () => {
   const current = { agents: { profiles: { 'claude-code': { mode: 'native', model: 'sonnet' } } } };
   const profiles = agents.updateProfile(current, 'claude-code', { mode: 'fcr' }, { knownModels: ['local-7b'] });
-  assert.strictEqual(profiles['claude-code'].model, 'auto');
+  assert.strictEqual(profiles['claude-code'].model, null);
   assert.throws(() => agents.updateProfile(current, 'claude-code', { mode: 'wrong' }), /native or fcr/);
 });
 

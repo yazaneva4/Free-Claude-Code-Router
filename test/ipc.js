@@ -99,7 +99,7 @@ test('signup through IPC then privileged channels open', async () => {
   assert.strictEqual(session.account.email, 'yazan@example.com');
   assert.strictEqual(session.accountCount, 1);
   const settings = await h.call('settings:get');
-  assert.strictEqual(settings.routing.preferredProvider, 'ollama');
+  assert.strictEqual(settings.routing.preferredProvider, null);
   const vault = await h.call('vault:list');
   assert.deepStrictEqual(vault.credentials, []);
   const bootstrap = await h.call('auth:bootstrap');
@@ -222,7 +222,7 @@ test('an unsupported API is refused at the IPC boundary', async () => {
 test('the new realtime channels are closed before sign in', async () => {
   const h = build();
   const channels = [
-    'agents:list', 'agents:add', 'agents:update', 'agents:remove',
+    'agents:list', 'agents:add', 'agents:update', 'agents:remove', 'agents:run',
     'gateway:status', 'gateway:models', 'gateway:probe', 'gateway:repair', 'gateway:hidden',
     'updates:check', 'updates:state', 'sync:push', 'sync:pull', 'sync:state',
     'sync:pushVault', 'sync:pullVault', 'updates:install', 'agents:login',
@@ -243,7 +243,7 @@ test('an agent profile is added explicitly and refuses what the router will not 
 
   const added = await h.call('agents:add', { agentId: 'claude-code', patch: { enabled: true } });
   assert.strictEqual(added.profiles['claude-code'].enabled, true);
-  assert.strictEqual(added.profiles['claude-code'].model, 'auto');
+  assert.strictEqual(added.profiles['claude-code'].model, null);
   assert.strictEqual(added.profiles['claude-code'].baseUrl, 'http://127.0.0.1:3456');
 
   const banned = await h.callFail('agents:add', { agentId: 'huggingface', patch: { enabled: true } });

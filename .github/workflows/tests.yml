@@ -41,6 +41,9 @@ jobs:
       - name: terminal installer tests
         run: node --test test/install.test.js
 
+      - name: routed launcher tests
+        run: node --test test/launcher.test.js
+
       - name: secret scan
         # This one is genuinely posix shell, so it is asked for by name rather
         # than left to the platform default, which is PowerShell on Windows.

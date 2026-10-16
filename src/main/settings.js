@@ -49,19 +49,12 @@ function cleanIntegrationPatch(patch) {
 
 function defaults() {
   const providers = {};
-  for (const provider of ALL_PROVIDERS) {
-    providers[provider.id] = {
-      enabled: provider.kind === 'local',
-      baseUrl: provider.baseUrl,
-      autoFetchModels: true,
-    };
-  }
   return {
     version: SCHEMA_VERSION,
     routing: {
-      preferredProvider: 'ollama',
+      preferredProvider: null,
       modelByProvider: {},
-      fallbackOrder: ALL_PROVIDERS.filter((p) => p.kind === 'local').map((p) => p.id),
+      fallbackOrder: [],
     },
     providers,
     integrations: {
@@ -136,7 +129,7 @@ function sanitizeAgents(value) {
       if (typeof raw.enabled !== 'boolean') throw badRequest('invalid_value', 'enabled must be true or false.');
       profile.enabled = raw.enabled;
     }
-    if (raw.model !== undefined) profile.model = validateModel(raw.model);
+    if (raw.model !== undefined) profile.model = raw.model === null || raw.model === '' ? null : validateModel(raw.model);
     if (raw.baseUrl !== undefined) profile.baseUrl = validateBaseUrl(raw.baseUrl);
     // Written when the profile is added, and kept so a later save does not
     // quietly reset when the agent was first connected.
@@ -170,6 +163,7 @@ function sanitizeRouting(value) {
   const current = defaults().routing;
   const input = value && typeof value === 'object' ? value : {};
   const next = { ...current };
+  if (input.preferredProvider === null) next.preferredProvider = null;
   if (input.preferredProvider !== undefined && input.preferredProvider !== null) {
     next.preferredProvider = assertSupportedProvider(input.preferredProvider).id;
   }

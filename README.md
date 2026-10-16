@@ -90,7 +90,7 @@ Set-Location Free-Claude-Code-Router
 .\install.ps1
 ```
 
-If your Windows PowerShell execution policy blocks the local script, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1` from inside the cloned repository. These commands install the desktop application, **not** a global `fcr` terminal executable. For updates, run `git pull --ff-only` inside the repository and rerun the relevant installer.
+If your Windows PowerShell execution policy blocks the local script, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1` from inside the cloned repository. These commands install the desktop application and the `fcr` terminal launcher. For updates, run `git pull --ff-only` inside the repository and rerun the relevant installer.
 
 ## Terminal commands: native versus routed
 
@@ -102,7 +102,9 @@ If your Windows PowerShell execution policy blocks the local script, use `powers
 
 ## Agent profiles: manual setup
 
-The Agent Profiles page lists available harnesses as an **addable catalog**, not automatically configured profiles. A harness is only configured when you explicitly add it. Removing a profile deletes it from saved profiles; the catalog entry remains so you can add it again later. An unset model is not silently restored to a previously selected default. The terminal launcher currently supports `fcr claude`; additional harness launchers and desktop-app Run buttons are planned, not yet implemented.
+The Agent Profiles page lists available harnesses as an **addable catalog**, not automatically configured profiles. A harness is only configured when you explicitly add it. Removing a profile deletes it from saved profiles; the catalog entry remains so you can add it again later. An unset model is not silently restored to a previously selected default. New installations have no configured providers, fallback provider, or agent profiles. Clearing a selected model leaves it empty; pick and save a model before Run is enabled. Provider and harness catalogs remain available for manual setup. Existing saved configurations are preserved.
+
+Run opens an interactive terminal for Claude Code or Codex CLI. `fcr codex` uses a separate Codex home and a custom Responses API provider. `fcr codex-app` and its Run button launch an isolated Codex desktop process on macOS. The router must support `/v1/responses` for Codex; inference errors remain visible in the harness. Claude Desktop and Gemini launchers remain disabled because their desktop/native protocols need separate supported integrations. Native `claude` and `codex` commands keep their own configuration.
 
 ## Free routed agents (`fcr`)
 
@@ -114,7 +116,7 @@ API as well, for example `fcr claude-code`.
 This mode uses the configured router models and does not ask for a harness
 subscription or expose subscription-only models. Local models can run without
 cloud inference charges; a configured cloud provider can still charge for its
-models. Switching modes resets the selected model to automatic so a native
+models. Switching modes clears the selected model so a native
 subscription model is not carried into routed mode.
 
 ## Everyday commands
@@ -211,3 +213,7 @@ node scripts/check.js
 node test/run.js
 node test/ipc.js
 ```
+
+Launcher references: [Codex provider configuration](https://developers.openai.com/codex/config-reference/), [Claude gateway configuration](https://code.claude.com/docs/en/llm-gateway-connect). These launchers never rewrite native user settings.
+
+For a managed machine with Git and Node.js 22+ already installed, set `CCR_SKIP_DEPENDENCY_UPDATE=1` before running the installer to skip dependency upgrade checks. The app installation still runs. CI uses this option to avoid changing runner packages.
