@@ -64,7 +64,7 @@ installer dialogs and visual behavior require testing on the destination machine
 
 ### Copy-and-paste terminal setup
 
-Prerequisites for **all systems**: Git, Node.js **22+**, an internet connection for a fresh install, and a supported desktop environment. Quit any running Claude Code Router app before installing.
+The installer checks Git and Node.js, installs missing packages, and asks the available system package manager to update outdated packages. Already-current dependencies are left unchanged. Node.js **22+** is required; some Linux distribution repositories may not provide it, in which case the installer stops with an explanation. Package-manager updates may require administrator permission. Git is needed for the initial `git clone` step, so install Git first if it is missing (or download the repository ZIP). An internet connection is needed for fresh installations and package updates. Quit any running Claude Code Router app before installing.
 
 **macOS — Terminal**
 
