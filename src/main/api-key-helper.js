@@ -26,7 +26,6 @@ const HELPER_PREFIX = 'ccr-claude-code-api-key-';
 const TOKEN_PREFIX = 'ccr-profile-';
 /** The harness configs worth checking, newest convention first. */
 const CONFIG_PATHS = [
-  path.join('.claude', 'settings.json'),
   path.join('.claude-code-router', 'profiles', 'claude-code', 'claude', 'settings.json'),
 ];
 
