@@ -61,6 +61,37 @@ Windows in CI. The official Linux v3.1.3 AppImage was also downloaded, verified,
 patched successfully in an isolated test directory. Actual desktop launch, OS
 installer dialogs and visual behavior require testing on the destination machine.
 
+
+### Copy-and-paste terminal setup
+
+Prerequisites for **all systems**: Git, Node.js **22+**, an internet connection for a fresh install, and a supported desktop environment. Quit any running Claude Code Router app before installing.
+
+**macOS — Terminal**
+
+```bash
+git clone https://github.com/yazaneva4/Free-Claude-Code-Router.git
+cd Free-Claude-Code-Router
+bash install.sh
+```
+
+**Linux — Terminal**
+
+```bash
+git clone https://github.com/yazaneva4/Free-Claude-Code-Router.git
+cd Free-Claude-Code-Router
+bash install.sh
+```
+
+**Windows — PowerShell**
+
+```powershell
+git clone https://github.com/yazaneva4/Free-Claude-Code-Router.git
+Set-Location Free-Claude-Code-Router
+.\install.ps1
+```
+
+If your Windows PowerShell execution policy blocks the local script, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1` from inside the cloned repository. These commands install the desktop application, **not** a global `fcr` terminal executable. For updates, run `git pull --ff-only` inside the repository and rerun the relevant installer.
+
 ## Free routed agents (`fcr`)
 
 In Settings → Agents, choose `fcr Claude Code`, `fcr Codex CLI`, or the
