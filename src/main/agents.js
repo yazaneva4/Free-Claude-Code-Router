@@ -524,7 +524,7 @@ function publicAgent(agent, settings, { knownModels = null, discovered = null, b
     needsLogin: agent.needsLogin,
     added: Boolean(saved),
     enabled: Boolean(saved && saved.enabled),
-    model: saved && saved.model ? saved.model : 'auto',
+    model: saved && saved.model ? saved.model : null,
     baseUrl: saved && saved.baseUrl ? saved.baseUrl : GATEWAY_BASE_URL,
     ownModels: found && Array.isArray(found.models) ? found.models.slice() : [],
     ownModelsSource: found ? found.source : 'not-checked',
@@ -540,7 +540,8 @@ function publicAgent(agent, settings, { knownModels = null, discovered = null, b
 }
 
 function listAgents(settings, options = {}) {
-  return AGENTS.map((agent) => publicAgent(agent, settings, { ...options, discovered: (options.discovered || {})[agent.id] }));
+  return AGENTS.filter((agent) => Object.prototype.hasOwnProperty.call(profileState(settings), agent.id))
+    .map((agent) => publicAgent(agent, settings, { ...options, discovered: (options.discovered || {})[agent.id] }));
 }
 
 /**
@@ -587,7 +588,7 @@ function addProfile(settings, agentId, patch = {}, options = {}) {
     ...existing,
     mode,
     enabled: typeof patch.enabled === 'boolean' ? patch.enabled : existing.enabled !== false,
-    model: patch.model === undefined ? (modeChanged ? 'auto' : existing.model || 'auto') : validateModel(patch.model, options.knownModels),
+    model: patch.model === undefined ? (modeChanged ? null : existing.model || null) : (patch.model === null || patch.model === '' ? null : validateModel(patch.model, options.knownModels)),
     baseUrl: patch.baseUrl === undefined ? existing.baseUrl || GATEWAY_BASE_URL : validateBaseUrl(patch.baseUrl),
     addedAt: existing.addedAt || new Date().toISOString(),
     label: patch.label === undefined ? existing.label : cleanText(patch.label, 60),
