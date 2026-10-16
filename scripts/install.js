@@ -82,7 +82,11 @@ function findBundle(directory, depth = 0) {
 function installRuntime(file, destination, platform, stage, run = execFileSync) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   if (platform === 'win32') {
+    // NSIS /D must be the final argument and must not be quoted.
     run(file, ['/S', `/D=${destination}`], { stdio: 'inherit' });
+    if (!fs.existsSync(resourceDir(destination, platform))) {
+      throw new Error(`Windows installer did not create an application at ${destination}.`);
+    }
     return;
   }
   const unpacked = path.join(stage, 'unpacked');
