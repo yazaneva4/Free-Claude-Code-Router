@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('gate', {
     update: (agentId, patch) => unwrap(invoke('agents:update', { agentId, patch })),
     remove: (agentId) => unwrap(invoke('agents:remove', { agentId })),
     login: (agentId) => unwrap(invoke('agents:login', { agentId })),
+    run: (agentId) => unwrap(invoke('agents:run', { agentId })),
   },
   gateway: {
     status: () => unwrap(invoke('gateway:status')),
