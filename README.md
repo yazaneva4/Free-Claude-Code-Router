@@ -100,6 +100,10 @@ If your Windows PowerShell execution policy blocks the local script, use `powers
 - The installer places the `fcr` launcher in `~/.local/bin` on macOS/Linux or `%APPDATA%\\npm` on Windows. Ensure that directory is in your shell PATH, and reopen your terminal after installation.
 - **Important:** This launcher does not rewrite your native Claude configuration. Older FCR/upstream router installations may already have changed `~/.claude/settings.json`; review and restore those older changes separately if native `claude` is still routed.
 
+## Agent profiles: manual setup
+
+The Agent Profiles page lists available harnesses as an **addable catalog**, not automatically configured profiles. A harness is only configured when you explicitly add it. Removing a profile deletes it from saved profiles; the catalog entry remains so you can add it again later. An unset model is not silently restored to a previously selected default. The terminal launcher currently supports `fcr claude`; additional harness launchers and desktop-app Run buttons are planned, not yet implemented.
+
 ## Free routed agents (`fcr`)
 
 In Settings → Agents, choose `fcr Claude Code`, `fcr Codex CLI`, or the
