@@ -163,6 +163,24 @@ function patchApp(appPath, platform, { root = ROOT, run = execFileSync, log = co
   }
 }
 
+function installLauncher(root = ROOT, home = os.homedir(), platform = process.platform, env = process.env) {
+  const bin = platform === 'win32'
+    ? path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm')
+    : path.join(home, '.local', 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const cli = path.join(root, 'scripts', 'fcr-cli.js');
+  if (!fs.existsSync(cli)) throw new Error('Missing FCR CLI launcher.');
+  if (platform === 'win32') {
+    const wrapper = path.join(bin, 'fcr.cmd');
+    fs.writeFileSync(wrapper, '@echo off\r\nnode "' + cli.replace(/"/g, '""') + '" %*\r\n');
+  } else {
+    const wrapper = path.join(bin, 'fcr');
+    fs.writeFileSync(wrapper, '#!/bin/sh\nexec node "' + cli.replace(/"/g, '\\"') + '" "$@"\n', { mode: 0o755 });
+    fs.chmodSync(wrapper, 0o755);
+  }
+  return bin;
+}
+
 async function install(options = {}) {
   const platform = options.platform || process.platform;
   const arch = options.arch || process.arch;
@@ -196,6 +214,10 @@ async function install(options = {}) {
     } finally { fs.rmSync(stage, { recursive: true, force: true }); }
   }
   patchApp(appPath, platform, { root: options.root || ROOT, run, log });
+  if (!options.skipLauncher) {
+    const bin = installLauncher(options.root || ROOT, home, platform, env);
+    log(`fcr launcher installed in ${bin}. Ensure this directory is on PATH.`);
+  }
   log(platform === 'darwin' ? `Open: open ${JSON.stringify(appPath)}` : platform === 'linux' ? `Open: ${JSON.stringify(path.join(appPath, 'AppRun'))}` : `Open: ${path.join(appPath, APP + '.exe')}`);
   return appPath;
 }
@@ -215,4 +237,4 @@ async function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) main().catch(error => { console.error(`Installation failed: ${error.message}`); process.exitCode = 1; });
-module.exports = { install, patchApp, installRuntime, selectAsset, download, hasUpstreamMain, findApp, defaultPath, resourceDir, main };
+module.exports = { install, patchApp, installRuntime, selectAsset, download, hasUpstreamMain, findApp, defaultPath, resourceDir, main, installLauncher };
