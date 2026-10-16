@@ -540,8 +540,7 @@ function publicAgent(agent, settings, { knownModels = null, discovered = null, b
 }
 
 function listAgents(settings, options = {}) {
-  return AGENTS.filter((agent) => Object.prototype.hasOwnProperty.call(profileState(settings), agent.id))
-    .map((agent) => publicAgent(agent, settings, { ...options, discovered: (options.discovered || {})[agent.id] }));
+  return AGENTS.map((agent) => publicAgent(agent, settings, { ...options, discovered: (options.discovered || {})[agent.id] }));
 }
 
 /**
