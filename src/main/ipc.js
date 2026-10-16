@@ -350,6 +350,31 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
     return result;
   });
 
+  handle(ipcMain, 'agents:run', async (payload) => {
+    session();
+    const agent = agents.getAgent(payload.agentId);
+    const profile = agent && agents.profileState(settings.get())[agent.id];
+    if (!agent || !profile) throw validators.badRequest('profile_not_added', 'Add this harness manually before running it.');
+    if (profile.mode !== 'fcr') throw validators.badRequest('not_routed', 'Select FCR mode before using Run.');
+    if (agent.kind !== 'cli' || agent.binary !== 'claude') {
+      throw validators.badRequest('unsupported_launcher', 'This harness does not yet have a verified isolated router launcher.');
+    }
+    const { spawn } = require('node:child_process');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const token = require('./api-key-helper').currentToken();
+    if (!token) throw validators.badRequest('gateway_not_configured', 'Configure the router gateway first.');
+    const configDir = path.join(os.homedir(), '.claude-code-router', 'fcr-claude-config');
+    fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: configDir, ANTHROPIC_BASE_URL: endpoint(), ANTHROPIC_AUTH_TOKEN: token };
+    delete env.ANTHROPIC_API_KEY;
+    const child = spawn(agent.binary, [], { detached: true, stdio: 'ignore', env, shell: false });
+    child.on('error', () => {});
+    child.unref();
+    return { started: true, note: 'Started routed Claude Code. CLI harness launch does not open a new terminal window.' };
+  });
+
   handle(ipcMain, 'agents:remove', (payload) => {
     session();
     const profiles = agents.removeProfile(settings.get(), payload.agentId);
