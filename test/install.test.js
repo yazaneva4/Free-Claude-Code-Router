@@ -121,3 +121,10 @@ test('terminal entry point honors CCR_NODE and works from a path with spaces', t
   }
   assert.ok(fs.existsSync(path.join(resourceDir(appPath, process.platform), 'app-original.asar')));
 });
+
+test('Windows installer rejects a native installer that exits without installing resources', t => {
+  const f = fixture(t);
+  const destination = defaultPath('win32', f.home, {});
+  const installer = require('../scripts/install');
+  assert.throws(() => installer.installRuntime('fake-setup.exe', destination, 'win32', f.home, () => {}), /did not create an application/);
+});
