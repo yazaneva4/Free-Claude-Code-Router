@@ -215,7 +215,7 @@ async function install(options = {}) {
   }
   patchApp(appPath, platform, { root: options.root || ROOT, run, log });
   if (!options.skipLauncher) {
-    const bin = installLauncher(options.root || ROOT, home, platform, env);
+    const bin = installLauncher(ROOT, home, platform, env);
     log(`fcr launcher installed in ${bin}. Ensure this directory is on PATH.`);
   }
   log(platform === 'darwin' ? `Open: open ${JSON.stringify(appPath)}` : platform === 'linux' ? `Open: ${JSON.stringify(path.join(appPath, 'AppRun'))}` : `Open: ${path.join(appPath, APP + '.exe')}`);
