@@ -92,6 +92,14 @@ Set-Location Free-Claude-Code-Router
 
 If your Windows PowerShell execution policy blocks the local script, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1` from inside the cloned repository. These commands install the desktop application, **not** a global `fcr` terminal executable. For updates, run `git pull --ff-only` inside the repository and rerun the relevant installer.
 
+## Terminal commands: native versus routed
+
+- `claude` starts the original Claude Code installation with its normal authentication and configuration.
+- `fcr claude` starts Claude Code with a separate `CLAUDE_CONFIG_DIR` and the local FCR gateway token. Arguments are forwarded, for example `fcr claude -p "Hello"`.
+- `fcr claude` requires a running, configured router. It does not silently fall back to native Claude.
+- The installer places the `fcr` launcher in `~/.local/bin` on macOS/Linux or `%APPDATA%\\npm` on Windows. Ensure that directory is in your shell PATH, and reopen your terminal after installation.
+- **Important:** This launcher does not rewrite your native Claude configuration. Older FCR/upstream router installations may already have changed `~/.claude/settings.json`; review and restore those older changes separately if native `claude` is still routed.
+
 ## Free routed agents (`fcr`)
 
 In Settings → Agents, choose `fcr Claude Code`, `fcr Codex CLI`, or the
