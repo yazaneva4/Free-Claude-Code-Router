@@ -314,6 +314,22 @@
         }
       });
       row.append(button);
+      if (agent.added && agent.fcrMode && agent.kind === 'cli' && agent.id === 'claude-code') {
+        const run = document.createElement('button');
+        run.type = 'button';
+        run.className = 'primary';
+        run.dataset.role = 'run';
+        run.textContent = 'Run';
+        run.addEventListener('click', async () => {
+          run.disabled = true;
+          try {
+            const result = await api.agents.run(agent.id);
+            toast(result.note || 'Launched.');
+          } catch (err) { toast(err.message, true); }
+          finally { run.disabled = false; }
+        });
+        row.append(run);
+      }
       card.append(row);
 
       // A subscription's models only appear once the agent is signed in, so the
