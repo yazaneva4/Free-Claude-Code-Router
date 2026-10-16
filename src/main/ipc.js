@@ -368,14 +368,7 @@ function registerIpc({ ipcMain, accounts, vault, settings, crypto, onSessionEnde
     fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
     const env = { ...process.env, CLAUDE_CONFIG_DIR: configDir, ANTHROPIC_BASE_URL: endpoint(), ANTHROPIC_AUTH_TOKEN: token };
     delete env.ANTHROPIC_API_KEY;
-    // Launch in a real terminal: interactive CLI needs a TTY for input and output.
-    const launcher = agents.terminalLauncher(agent.binary, []);
-    if (process.platform !== 'darwin') {
-      throw validators.badRequest('terminal_unavailable', 'Use fcr claude in your terminal on this operating system until its terminal launcher is ready.');
-    }
-    const { execFile } = require('node:child_process');
-    await new Promise((resolve, reject) => execFile(launcher[0], launcher[1], { env, timeout: 20000 }, (err) => err ? reject(err) : resolve()));
-    return { started: true, note: 'Opened a routed Claude Code terminal.' };
+    throw validators.badRequest('terminal_unavailable', 'Run fcr claude in your terminal. A safe interactive Run launcher is not yet available for this operating system.');
   });
 
   handle(ipcMain, 'agents:remove', (payload) => {
